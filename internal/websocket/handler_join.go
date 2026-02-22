@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/recovery"
 	peerManager "sfu-v2/internal/webrtc"

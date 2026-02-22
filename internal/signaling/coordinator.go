@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/recovery"
 	"sfu-v2/internal/room"
