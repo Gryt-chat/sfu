@@ -9,7 +9,7 @@ import (
 	"net/url"
 
 	"github.com/gorilla/websocket"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/recovery"

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 // Config holds the application configuration

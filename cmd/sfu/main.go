@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	pion "github.com/pion/webrtc/v3"
+	pion "github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/recovery"

@@ -4,7 +4,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 // Manager handles the lifecycle of media tracks per room
