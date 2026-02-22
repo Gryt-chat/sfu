@@ -44,6 +44,10 @@ Full docs at **[docs.gryt.chat/docs/sfu](https://docs.gryt.chat/docs/sfu)**:
 - [Voice Debugging](https://docs.gryt.chat/docs/sfu/voice-debugging) — troubleshooting audio issues
 - [Deployment](https://docs.gryt.chat/docs/deployment) — Docker Compose, Kubernetes
 
+## Issues
+
+Please report bugs and request features in the [main Gryt repository](https://github.com/Gryt-chat/gryt/issues).
+
 ## License
 
 [AGPL-3.0](https://github.com/Gryt-chat/gryt/blob/main/LICENSE) — Part of [Gryt](https://github.com/Gryt-chat/gryt)
