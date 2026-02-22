@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	pion "github.com/pion/webrtc/v3"
@@ -17,6 +18,8 @@ import (
 	webrtcmanager "sfu-v2/internal/webrtc"
 	"sfu-v2/internal/websocket"
 )
+
+var Version = "dev"
 
 func main() {
 	// Set up global panic recovery
@@ -46,7 +49,11 @@ func main() {
 	}
 
 	// Log startup information
-	log.Printf("🚀 Starting SFU Server")
+	banner := fmt.Sprintf("Gryt SFU v%s", Version)
+	border := strings.Repeat("─", len(banner)+4)
+	log.Printf("┌%s┐", border)
+	log.Printf("│  %s  │", banner)
+	log.Printf("└%s┘", border)
 	log.Printf("📊 Configuration: Port=%s, Debug=%t, VerboseLog=%t", cfg.Port, cfg.Debug, cfg.VerboseLog)
 	log.Printf("🧊 ICE Servers: %v", cfg.STUNServers)
 
@@ -167,7 +174,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"healthy","service":"sfu","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+		w.Write([]byte(`{"status":"healthy","service":"sfu","version":"` + Version + `","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
 	})
 
 	// Handle WebSocket connections with recovery wrapper

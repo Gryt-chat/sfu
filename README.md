@@ -6,7 +6,16 @@
 
 <br />
 
-## Quick Start
+## Docker
+
+```bash
+docker pull ghcr.io/gryt-chat/sfu:1.0.0
+docker run -p 5005:5005 -p 10000-10019:10000-10019/udp --env-file .env ghcr.io/gryt-chat/sfu:1.0.0
+```
+
+Browse tags at [ghcr.io/gryt-chat/sfu](https://github.com/Gryt-chat/sfu/pkgs/container/sfu).
+
+## Quick Start (development)
 
 ```bash
 cp env.example .env
