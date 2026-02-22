@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+[[ -d /usr/local/go/bin ]] && export PATH="/usr/local/go/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERSION_FILE="$PKG_DIR/VERSION"
