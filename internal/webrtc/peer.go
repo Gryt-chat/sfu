@@ -173,6 +173,19 @@ func CreatePeerConnection(api *webrtc.API, config webrtc.Configuration) (*webrtc
 		return nil, err
 	}
 
+	// Screen share: video + audio
+	if _, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		return nil, err
+	}
+
+	if _, err := peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		return nil, err
+	}
+
 	return peerConnection, nil
 }
 
