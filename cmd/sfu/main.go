@@ -106,8 +106,8 @@ func main() {
 			log.Printf("🧊 ICE UDP port range pinned: %d-%d", cfg.ICEUDPPortMin, cfg.ICEUDPPortMax)
 		}
 		if len(cfg.ICEAdvertiseIPs) > 0 {
-			se.SetNAT1To1IPs(cfg.ICEAdvertiseIPs, pion.ICECandidateTypeHost)
-			log.Printf("🧊 ICE advertise IPs set: %v", cfg.ICEAdvertiseIPs)
+			se.SetNAT1To1IPs(cfg.ICEAdvertiseIPs, pion.ICECandidateTypeSrflx)
+			log.Printf("🧊 ICE advertise IPs (srflx): %v", cfg.ICEAdvertiseIPs)
 		}
 		me := &pion.MediaEngine{}
 		if err := me.RegisterDefaultCodecs(); err != nil {
