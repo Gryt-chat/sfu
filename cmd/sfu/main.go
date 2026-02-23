@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pion/ice/v4"
 	pion "github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/config"
@@ -101,7 +102,17 @@ func main() {
 	// Build a Pion WebRTC API with a configured SettingEngine (UDP port range, advertised IP, etc.)
 	err = recovery.SafeExecute("MAIN", "INIT_WEBRTC_API", func() error {
 		se := pion.SettingEngine{}
-		if cfg.ICEUDPPortMin > 0 && cfg.ICEUDPPortMax >= cfg.ICEUDPPortMin && cfg.ICEUDPPortMax <= 65535 {
+
+		// If ICE UDP mux is enabled, all ICE traffic can flow over a single UDP port.
+		// This dramatically improves success rates on networks that block "high port" UDP ranges.
+		if cfg.ICEUDPMuxPort > 0 && cfg.ICEUDPMuxPort <= 65535 {
+			udpMux, muxErr := ice.NewMultiUDPMuxFromPort(cfg.ICEUDPMuxPort)
+			if muxErr != nil {
+				return fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
+			}
+			se.SetICEUDPMux(udpMux)
+			log.Printf("🧊 ICE UDP mux enabled on port: %d", cfg.ICEUDPMuxPort)
+		} else if cfg.ICEUDPPortMin > 0 && cfg.ICEUDPPortMax >= cfg.ICEUDPPortMin && cfg.ICEUDPPortMax <= 65535 {
 			se.SetEphemeralUDPPortRange(uint16(cfg.ICEUDPPortMin), uint16(cfg.ICEUDPPortMax))
 			log.Printf("🧊 ICE UDP port range pinned: %d-%d", cfg.ICEUDPPortMin, cfg.ICEUDPPortMax)
 		}
@@ -150,7 +161,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize WebSocket handler: %v", err)
 	}
-
 
 	// Start room cleanup routine with recovery
 	recovery.SafeGoroutine("MAIN", "ROOM_CLEANUP", func() {
