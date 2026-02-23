@@ -19,10 +19,11 @@ type Config struct {
 	VerboseLog  bool
 
 	// WebRTC / ICE networking
-	ICEUDPPortMin  int
-	ICEUDPPortMax  int
+	ICEUDPPortMin   int
+	ICEUDPPortMax   int
+	ICEUDPMuxPort   int
 	ICEAdvertiseIPs []string
-	DisableSTUN    bool
+	DisableSTUN     bool
 
 	// Capacity guardrail (primarily to match UDP port range)
 	MaxPeers int
@@ -59,6 +60,7 @@ func Load() (*Config, error) {
 
 	iceUDPPortMin, _ := strconv.Atoi(os.Getenv("ICE_UDP_PORT_MIN"))
 	iceUDPPortMax, _ := strconv.Atoi(os.Getenv("ICE_UDP_PORT_MAX"))
+	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
 	var iceAdvertiseIPs []string
 	if raw := os.Getenv("ICE_ADVERTISE_IP"); raw != "" {
 		for _, ip := range strings.Split(raw, ",") {
@@ -69,7 +71,11 @@ func Load() (*Config, error) {
 	}
 
 	maxPeers, _ := strconv.Atoi(os.Getenv("MAX_PEERS"))
-	if maxPeers <= 0 && iceUDPPortMin > 0 && iceUDPPortMax >= iceUDPPortMin {
+	if maxPeers <= 0 && iceUDPMuxPort > 0 {
+		// With ICE UDP mux enabled, we can accept many peers on a single UDP port.
+		// Keep it bounded by MAX_PEERS if provided; otherwise use a conservative default.
+		maxPeers = 200
+	} else if maxPeers <= 0 && iceUDPPortMin > 0 && iceUDPPortMax >= iceUDPPortMin {
 		// Default capacity to the size of the pinned UDP port range.
 		maxPeers = (iceUDPPortMax - iceUDPPortMin + 1)
 	}
@@ -84,15 +90,16 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port:        port,
-		STUNServers: stunServers,
-		ICEServers:  iceServers,
-		Debug:       debug,
-		VerboseLog:  verboseLog,
-		ICEUDPPortMin: iceUDPPortMin,
-		ICEUDPPortMax: iceUDPPortMax,
+		Port:            port,
+		STUNServers:     stunServers,
+		ICEServers:      iceServers,
+		Debug:           debug,
+		VerboseLog:      verboseLog,
+		ICEUDPPortMin:   iceUDPPortMin,
+		ICEUDPPortMax:   iceUDPPortMax,
+		ICEUDPMuxPort:   iceUDPMuxPort,
 		ICEAdvertiseIPs: iceAdvertiseIPs,
-		DisableSTUN:    disableSTUN,
-		MaxPeers:       maxPeers,
+		DisableSTUN:     disableSTUN,
+		MaxPeers:        maxPeers,
 	}, nil
 }
