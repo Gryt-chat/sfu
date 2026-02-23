@@ -10,7 +10,7 @@
 
 ```bash
 docker pull ghcr.io/gryt-chat/sfu:latest
-docker run -p 5005:5005 -p 10000-10019:10000-10019/udp --env-file .env ghcr.io/gryt-chat/sfu:latest
+docker run -p 5005:5005 -p 443:443/udp -p 10000-10019:10000-10019/udp --env-file .env ghcr.io/gryt-chat/sfu:latest
 ```
 
 Browse tags at [ghcr.io/gryt-chat/sfu](https://github.com/Gryt-chat/sfu/pkgs/container/sfu).
@@ -32,6 +32,7 @@ See `env.example` for all options. Key variables:
 |----------|---------|-------------|
 | `PORT` | `5005` | HTTP/WebSocket port |
 | `STUN_SERVERS` | `stun:stun.l.google.com:19302` | Comma-separated STUN servers |
+| `ICE_UDP_MUX_PORT` | — | Enable ICE UDP mux on a single UDP port (e.g. `443`) |
 | `ICE_UDP_PORT_MIN` | — | Min UDP port for WebRTC media |
 | `ICE_UDP_PORT_MAX` | — | Max UDP port for WebRTC media |
 | `ICE_ADVERTISE_IP` | — | Advertised IP for NAT traversal |
