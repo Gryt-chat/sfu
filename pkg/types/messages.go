@@ -66,6 +66,7 @@ const (
 	EventDisconnectUser = "disconnect_user"
 	EventPeerJoined     = "peer_joined"
 	EventPeerLeft       = "peer_left"
+	EventRenegotiate    = "renegotiate"
 	EventSyncRequest    = "sync_request"
 	EventSyncResponse   = "sync_response"
 )

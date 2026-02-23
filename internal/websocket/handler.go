@@ -271,6 +271,8 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 				return h.handleICECandidate(peerConnection, message.Data, clientID)
 			case types.EventAnswer:
 				return h.handleAnswer(peerConnection, message.Data, clientID, roomID)
+			case types.EventRenegotiate:
+				return h.handleRenegotiate(peerConnection, conn, clientID, roomID)
 			case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from %s", clientID)
@@ -329,6 +331,40 @@ func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clie
 	// an offer when there are actual track changes (no infinite loop).
 	go h.coordinator.SignalPeerConnectionsInRoom(roomID)
 	return nil
+}
+
+// handleRenegotiate creates a fresh offer so the client can include newly
+// added tracks (camera, screen share) in its answer.
+func (h *Handler) handleRenegotiate(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) error {
+	if peerConnection.SignalingState() != webrtc.SignalingStateStable {
+		h.debugLog("⏳ Skipping renegotiate for %s: signaling state=%s", clientID, peerConnection.SignalingState().String())
+		return nil
+	}
+
+	h.debugLog("🔄 Renegotiation requested by client %s in room '%s'", clientID, roomID)
+
+	offer, err := peerConnection.CreateOffer(nil)
+	if err != nil {
+		h.debugLog("❌ Error creating renegotiation offer for %s: %v", clientID, err)
+		return err
+	}
+
+	if err := peerConnection.SetLocalDescription(offer); err != nil {
+		h.debugLog("❌ Error setting local description for renegotiation (%s): %v", clientID, err)
+		return err
+	}
+
+	offerJSON, marshalErr := recovery.SafeJSONMarshal(offer)
+	if marshalErr != nil {
+		h.debugLog("❌ Error marshalling renegotiation offer for %s: %v", clientID, marshalErr)
+		return marshalErr
+	}
+
+	h.debugLog("📤 Sending renegotiation offer to %s (%d bytes SDP)", clientID, len(offer.SDP))
+	return conn.WriteJSON(&types.WebSocketMessage{
+		Event: types.EventOffer,
+		Data:  string(offerJSON),
+	})
 }
 
 // sendErrorToConnection sends an error message to a WebSocket connection

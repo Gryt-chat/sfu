@@ -235,33 +235,29 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 	})
 }
 
-// forwardRTPPackets forwards RTP packets from remote track to local track
-func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP, clientID string) error {
+// forwardRTPPackets forwards RTP packets from remote track to local track.
+// This is a hot loop — no per-packet locking, logging, or allocations.
+func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP, clientID string) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("panic in RTP forwarding for %s: %v", clientID, r)
+			recovery.GetLogger().LogAction("WEBRTC", "RTP_FORWARD_PANIC", clientID, "", fmt.Sprintf("%v", r))
+		}
+	}()
+
 	buf := make([]byte, 1500)
 	rtpPacketCount := 0
 
 	for {
-		var i int
-		var readErr error
-
-		err := recovery.SafeExecuteWithContext("WEBRTC", "READ_RTP_PACKET", clientID, "", "Reading RTP packet", func() error {
-			i, _, readErr = remoteTrack.Read(buf)
+		i, _, readErr := remoteTrack.Read(buf)
+		if readErr != nil {
+			h.debugLog("🎵 Track read ended for %s: %v", clientID, readErr)
 			return readErr
-		})
-
-		if err != nil {
-			h.debugLog("🎵 Track read ended for %s: %v", clientID, err)
-			return err
 		}
 
-		err = recovery.SafeExecuteWithContext("WEBRTC", "WRITE_RTP_PACKET", clientID, "", "Writing RTP packet", func() error {
-			_, writeErr := localTrack.Write(buf[:i])
+		if _, writeErr := localTrack.Write(buf[:i]); writeErr != nil {
+			h.debugLog("❌ Track write error for %s: %v", clientID, writeErr)
 			return writeErr
-		})
-
-		if err != nil {
-			h.debugLog("❌ Track write error for %s: %v", clientID, err)
-			return err
 		}
 
 		rtpPacketCount++
