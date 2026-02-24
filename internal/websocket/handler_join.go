@@ -3,7 +3,9 @@ package websocket
 import (
 	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/recovery"
@@ -230,20 +232,39 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 
 			h.coordinator.OnTrackAddedToRoom(roomID)
 
-			return h.forwardRTPPackets(t, trackLocal, clientID)
+			return h.forwardRTPPackets(t, trackLocal, clientID, peerConnection)
 		})
 	})
 }
 
 // forwardRTPPackets forwards RTP packets from remote track to local track.
-// This is a hot loop — no per-packet locking, logging, or allocations.
-func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP, clientID string) (retErr error) {
+// For video tracks, it also sends periodic PLI (Picture Loss Indication)
+// RTCP packets so the sender emits keyframes that new receivers need to
+// decode the stream (without this, late-joining receivers see black video).
+func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP, clientID string, pc *webrtc.PeerConnection) (retErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("panic in RTP forwarding for %s: %v", clientID, r)
 			recovery.GetLogger().LogAction("WEBRTC", "RTP_FORWARD_PANIC", clientID, "", fmt.Sprintf("%v", r))
 		}
 	}()
+
+	if remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+					return
+				}
+				if writeErr := pc.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
+				}); writeErr != nil {
+					return
+				}
+			}
+		}()
+	}
 
 	buf := make([]byte, 1500)
 	rtpPacketCount := 0
