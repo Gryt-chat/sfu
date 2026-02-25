@@ -239,6 +239,7 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 
 		message := &types.WebSocketMessage{}
 		messageCount := 0
+		pendingRenegotiate := false
 
 		for {
 			var raw []byte
@@ -270,13 +271,28 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 
 			err = recovery.SafeExecuteWithContext("WEBSOCKET", "PROCESS_CLIENT_MESSAGE", clientID, roomID, message.Event, func() error {
 				switch message.Event {
-			case types.EventCandidate:
-				return h.handleICECandidate(peerConnection, message.Data, clientID)
-			case types.EventAnswer:
-				return h.handleAnswer(peerConnection, message.Data, clientID, roomID)
-			case types.EventRenegotiate:
-				return h.handleRenegotiate(peerConnection, conn, clientID, roomID)
-			case types.EventKeepAlive:
+				case types.EventCandidate:
+					return h.handleICECandidate(peerConnection, message.Data, clientID)
+				case types.EventAnswer:
+					if answerErr := h.handleAnswer(peerConnection, message.Data, clientID, roomID); answerErr != nil {
+						return answerErr
+					}
+					if pendingRenegotiate {
+						pendingRenegotiate = false
+						h.debugLog("🔄 Executing deferred renegotiation for %s", clientID)
+						if reErr := h.handleRenegotiate(peerConnection, conn, clientID, roomID); reErr != nil {
+							h.debugLog("❌ Deferred renegotiation failed for %s: %v", clientID, reErr)
+						}
+					}
+					return nil
+				case types.EventRenegotiate:
+					if peerConnection.SignalingState() != webrtc.SignalingStateStable {
+						h.debugLog("⏳ Deferring renegotiate for %s: signaling state=%s", clientID, peerConnection.SignalingState().String())
+						pendingRenegotiate = true
+						return nil
+					}
+					return h.handleRenegotiate(peerConnection, conn, clientID, roomID)
+				case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from %s", clientID)
 					}
@@ -340,7 +356,7 @@ func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clie
 // added tracks (camera, screen share) in its answer.
 func (h *Handler) handleRenegotiate(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) error {
 	if peerConnection.SignalingState() != webrtc.SignalingStateStable {
-		h.debugLog("⏳ Skipping renegotiate for %s: signaling state=%s", clientID, peerConnection.SignalingState().String())
+		h.debugLog("⏳ Cannot renegotiate for %s right now: signaling state=%s (will be retried after next answer)", clientID, peerConnection.SignalingState().String())
 		return nil
 	}
 
