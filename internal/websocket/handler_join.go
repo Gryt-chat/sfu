@@ -8,6 +8,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
+	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
 	peerManager "sfu-v2/internal/webrtc"
 	"sfu-v2/pkg/types"
@@ -224,12 +225,13 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 				recovery.SafeExecuteWithContext("WEBRTC", "CLEANUP_TRACK", clientID, roomID, "Cleaning up track", func() error {
 					h.trackManager.RemoveTrackFromRoom(roomID, trackLocal)
 					h.coordinator.OnTrackRemovedFromRoom(roomID)
+					metrics.TracksActive.Dec()
 					return nil
 				})
 			}()
 
 			h.debugLog("🎵 Created local track for forwarding from %s", clientID)
-
+			metrics.TracksActive.Inc()
 			h.coordinator.OnTrackAddedToRoom(roomID)
 
 			return h.forwardRTPPackets(t, trackLocal, clientID, peerConnection)

@@ -10,8 +10,10 @@ import (
 
 	"github.com/pion/ice/v4"
 	pion "github.com/pion/webrtc/v4"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"sfu-v2/internal/config"
+	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
 	"sfu-v2/internal/room"
 	"sfu-v2/internal/signaling"
@@ -187,6 +189,23 @@ func main() {
 		w.Write([]byte(`{"status":"healthy","service":"sfu","version":"` + Version + `","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
 	})
 
+	http.Handle("/metrics", promhttp.Handler())
+
+	// Periodically sync room/peer gauges with actual state
+	recovery.SafeGoroutine("MAIN", "METRICS_SYNC", func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := webrtcManager.GetRoomStats()
+			metrics.RoomsActive.Set(float64(len(stats)))
+			totalPeers := 0
+			for _, count := range stats {
+				totalPeers += count
+			}
+			metrics.PeersActive.Set(float64(totalPeers))
+		}
+	})
+
 	// Handle WebSocket connections with recovery wrapper
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a WebSocket upgrade request
@@ -212,6 +231,7 @@ func main() {
 	log.Printf("   📡 /client (explicit WebSocket client endpoint)")
 	log.Printf("   📡 /server (WebSocket server registration endpoint)")
 	log.Printf("   🏥 /health (HTTP health check endpoint)")
+	log.Printf("   📊 /metrics (Prometheus metrics endpoint)")
 
 	// Log initial system stats
 	recovery.LogSystemStats()

@@ -12,6 +12,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/config"
+	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
 	"sfu-v2/internal/room"
 	"sfu-v2/internal/track"
@@ -77,8 +78,10 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		metrics.WebSocketConnections.Inc()
 		safeConn := NewThreadSafeWriter(unsafeConn)
 		defer func() {
+			metrics.WebSocketConnections.Dec()
 			recovery.SafeExecute("WEBSOCKET", "CLOSE_CONNECTION", func() error {
 				safeConn.Close()
 				return nil

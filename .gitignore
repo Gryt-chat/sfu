@@ -1,0 +1,14 @@
+# Build output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace
+vendor/
+
+# Built binary
+/sfu
