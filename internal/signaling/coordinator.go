@@ -157,6 +157,18 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		return nil
 	}
 
+	// Server-side deafen: filter out audio tracks so the SFU stops forwarding them.
+	if c.roomManager.IsUserDeafened(roomID, clientID) {
+		filtered := make(map[string]*webrtc.TrackLocalStaticRTP, len(tracks))
+		for id, t := range tracks {
+			if t != nil && t.Kind() != webrtc.RTPCodecTypeAudio {
+				filtered[id] = t
+			}
+		}
+		c.debugLog("🔇 Peer %s is deafened, filtered %d audio track(s)", clientID, len(tracks)-len(filtered))
+		tracks = filtered
+	}
+
 	// Map of senders we are already using to avoid duplicates
 	existingSenders := map[string]bool{}
 	senderCount := 0

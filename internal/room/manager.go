@@ -26,6 +26,7 @@ type Room struct {
 	PeerConnections map[string]*webrtc.PeerConnection
 	Connections     map[string]JSONWriter
 	UserIDs         map[string]string // clientID -> userID (server-assigned user identifier)
+	DeafenedUsers   map[string]bool   // userID -> true if deafened (SFU stops forwarding audio)
 	CreatedAt       time.Time
 	LastActivity    time.Time
 	mutex           sync.RWMutex
@@ -140,6 +141,7 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 			PeerConnections: make(map[string]*webrtc.PeerConnection),
 			Connections:     make(map[string]JSONWriter),
 			UserIDs:         make(map[string]string),
+			DeafenedUsers:   make(map[string]bool),
 			CreatedAt:       time.Now(),
 			LastActivity:    time.Now(),
 		}
@@ -186,6 +188,7 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword string) er
 				PeerConnections: make(map[string]*webrtc.PeerConnection),
 				Connections:     make(map[string]JSONWriter),
 				UserIDs:         make(map[string]string),
+				DeafenedUsers:   make(map[string]bool),
 				CreatedAt:       time.Now(),
 				LastActivity:    time.Now(),
 			}
@@ -309,6 +312,9 @@ func (m *Manager) RemovePeerFromRoom(roomID, clientID string) error {
 			delete(room.PeerConnections, clientID)
 			delete(room.Connections, clientID)
 			delete(room.UserIDs, clientID)
+			if userID != "" {
+				delete(room.DeafenedUsers, userID)
+			}
 			room.LastActivity = time.Now()
 
 			m.debugLog("👤 Removed peer '%s' (user=%s) from room '%s' (Remaining peers: %d)", clientID, userID, roomID, len(room.PeerConnections))
@@ -478,4 +484,45 @@ func (m *Manager) ValidateServerCredentials(serverID, serverPassword string) boo
 	defer m.mutex.RUnlock()
 	pw, exists := m.registeredServers[serverID]
 	return exists && pw == serverPassword
+}
+
+// SetUserDeafened updates the deafen state for a user in a room.
+func (m *Manager) SetUserDeafened(roomID, userID string, deafened bool) error {
+	m.mutex.RLock()
+	room, exists := m.rooms[roomID]
+	m.mutex.RUnlock()
+	if !exists {
+		return fmt.Errorf("room %s does not exist", roomID)
+	}
+
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
+
+	if deafened {
+		room.DeafenedUsers[userID] = true
+	} else {
+		delete(room.DeafenedUsers, userID)
+	}
+	m.debugLog("🔇 User '%s' in room '%s': deafened=%v", userID, roomID, deafened)
+	return nil
+}
+
+// IsUserDeafened checks whether a peer (identified by SFU clientID) is deafened.
+// It resolves the clientID to a userID via the room's UserIDs map.
+func (m *Manager) IsUserDeafened(roomID, clientID string) bool {
+	m.mutex.RLock()
+	room, exists := m.rooms[roomID]
+	m.mutex.RUnlock()
+	if !exists {
+		return false
+	}
+
+	room.mutex.RLock()
+	defer room.mutex.RUnlock()
+
+	userID, ok := room.UserIDs[clientID]
+	if !ok {
+		return false
+	}
+	return room.DeafenedUsers[userID]
 }
