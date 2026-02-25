@@ -135,14 +135,16 @@ func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string
 			h.debugLog("📨 Server message from %s: event=%s", clientID, message.Event)
 
 			err = recovery.SafeExecuteWithContext("WEBSOCKET", "PROCESS_SERVER_MESSAGE", clientID, "", message.Event, func() error {
-				switch message.Event {
-				case types.EventServerRegister:
-					return h.handleServerRegistration(conn, clientID, message.Data)
-				case types.EventDisconnectUser:
-					return h.handleDisconnectUser(message.Data)
-				case types.EventSyncRequest:
-					return h.handleSyncRequest(conn, message.Data)
-				case types.EventKeepAlive:
+			switch message.Event {
+			case types.EventServerRegister:
+				return h.handleServerRegistration(conn, clientID, message.Data)
+			case types.EventDisconnectUser:
+				return h.handleDisconnectUser(message.Data)
+			case types.EventUserAudioControl:
+				return h.handleUserAudioControl(message.Data)
+			case types.EventSyncRequest:
+				return h.handleSyncRequest(conn, message.Data)
+			case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from server %s", clientID)
 					}
@@ -202,6 +204,31 @@ func (h *Handler) handleDisconnectUser(data string) error {
 	if err := h.roomManager.DisconnectUser(req.RoomID, req.UserID); err != nil {
 		h.debugLog("❌ disconnect_user failed: %v", err)
 	}
+	return nil
+}
+
+// handleUserAudioControl processes a server request to update a user's mute/deafen state.
+func (h *Handler) handleUserAudioControl(data string) error {
+	var req types.AudioControlData
+	if err := recovery.SafeJSONUnmarshal([]byte(data), &req); err != nil {
+		h.debugLog("❌ Error unmarshalling user_audio_control data: %v", err)
+		return err
+	}
+
+	if !h.roomManager.ValidateServerCredentials(req.ServerID, req.ServerPassword) {
+		h.debugLog("❌ user_audio_control: invalid credentials for server '%s'", req.ServerID)
+		return nil
+	}
+
+	h.debugLog("🔇 user_audio_control: server=%s room=%s user=%s muted=%v deafened=%v",
+		req.ServerID, req.RoomID, req.UserID, req.IsMuted, req.IsDeafened)
+
+	if err := h.roomManager.SetUserDeafened(req.RoomID, req.UserID, req.IsDeafened); err != nil {
+		h.debugLog("❌ user_audio_control: failed to set deafen state: %v", err)
+		return nil
+	}
+
+	go h.coordinator.SignalPeerConnectionsInRoom(req.RoomID)
 	return nil
 }
 

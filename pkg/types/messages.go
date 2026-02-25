@@ -53,20 +53,31 @@ type SyncRequestData struct {
 	ServerPassword string `json:"server_password"`
 }
 
+// AudioControlData is sent by the server to update a user's mute/deafen state.
+type AudioControlData struct {
+	RoomID         string `json:"room_id"`
+	UserID         string `json:"user_id"`
+	ServerID       string `json:"server_id"`
+	ServerPassword string `json:"server_password"`
+	IsMuted        bool   `json:"is_muted"`
+	IsDeafened     bool   `json:"is_deafened"`
+}
+
 // Supported WebSocket message events
 const (
-	EventOffer          = "offer"
-	EventAnswer         = "answer"
-	EventCandidate      = "candidate"
-	EventServerRegister = "server_register"
-	EventClientJoin     = "client_join"
-	EventRoomJoined     = "room_joined"
-	EventRoomError      = "room_error"
-	EventKeepAlive      = "keep_alive"
-	EventDisconnectUser = "disconnect_user"
-	EventPeerJoined     = "peer_joined"
-	EventPeerLeft       = "peer_left"
-	EventRenegotiate    = "renegotiate"
-	EventSyncRequest    = "sync_request"
-	EventSyncResponse   = "sync_response"
+	EventOffer            = "offer"
+	EventAnswer           = "answer"
+	EventCandidate        = "candidate"
+	EventServerRegister   = "server_register"
+	EventClientJoin       = "client_join"
+	EventRoomJoined       = "room_joined"
+	EventRoomError        = "room_error"
+	EventKeepAlive        = "keep_alive"
+	EventDisconnectUser   = "disconnect_user"
+	EventUserAudioControl = "user_audio_control"
+	EventPeerJoined       = "peer_joined"
+	EventPeerLeft         = "peer_left"
+	EventRenegotiate      = "renegotiate"
+	EventSyncRequest      = "sync_request"
+	EventSyncResponse     = "sync_response"
 )
