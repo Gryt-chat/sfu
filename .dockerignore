@@ -2,8 +2,16 @@
 .env.*
 .git
 .gitignore
+.github
+bin/
+vendor/
+sfu
+start.sh
+env.example
+VERSION
 *.log
 *.md
+LICENSE
 scripts/
 .vscode/
 .idea/
