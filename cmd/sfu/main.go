@@ -119,8 +119,14 @@ func main() {
 			log.Printf("🧊 ICE UDP port range pinned: %d-%d", cfg.ICEUDPPortMin, cfg.ICEUDPPortMax)
 		}
 		if len(cfg.ICEAdvertiseIPs) > 0 {
-			se.SetNAT1To1IPs(cfg.ICEAdvertiseIPs, pion.ICECandidateTypeSrflx)
-			log.Printf("🧊 ICE advertise IPs (srflx): %v", cfg.ICEAdvertiseIPs)
+			if rewriteErr := se.SetICEAddressRewriteRules(pion.ICEAddressRewriteRule{
+				External:        cfg.ICEAdvertiseIPs,
+				AsCandidateType: pion.ICECandidateTypeHost,
+				Mode:            pion.ICEAddressRewriteReplace,
+			}); rewriteErr != nil {
+				return fmt.Errorf("failed to set ICE address rewrite rules: %w", rewriteErr)
+			}
+			log.Printf("🧊 ICE address rewrite (host replace): %v", cfg.ICEAdvertiseIPs)
 		}
 		me := &pion.MediaEngine{}
 		if err := registerCodecsVP9First(me); err != nil {
