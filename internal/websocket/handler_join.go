@@ -215,7 +215,7 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
 
-			trackLocal := h.trackManager.AddTrackToRoom(roomID, t)
+			trackLocal := h.trackManager.AddTrackToRoom(roomID, t, peerConnection)
 			if trackLocal == nil {
 				h.debugLog("❌ Failed to create local track for %s", clientID)
 				return fmt.Errorf("failed to create local track")
@@ -253,7 +253,7 @@ func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack 
 
 	if remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
 		go func() {
-			ticker := time.NewTicker(3 * time.Second)
+			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
 				if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {

@@ -7,19 +7,29 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// SenderInfo holds the originating peer connection and remote SSRC for a track,
+// so RTCP from receivers can be relayed back to the sender.
+type SenderInfo struct {
+	PC         *webrtc.PeerConnection
+	RemoteSSRC uint32
+}
+
 // Manager handles the lifecycle of media tracks per room
 type Manager struct {
 	mu sync.RWMutex
 	// Map of roomID -> trackID -> track
 	roomTracks map[string]map[string]*webrtc.TrackLocalStaticRTP
-	debug      bool
+	// Map of roomID -> trackID -> sender info (peer connection + SSRC)
+	roomSenderInfo map[string]map[string]SenderInfo
+	debug          bool
 }
 
 // NewManager creates a new track manager
 func NewManager(debug bool) *Manager {
 	return &Manager{
-		roomTracks: make(map[string]map[string]*webrtc.TrackLocalStaticRTP),
-		debug:      debug,
+		roomTracks:     make(map[string]map[string]*webrtc.TrackLocalStaticRTP),
+		roomSenderInfo: make(map[string]map[string]SenderInfo),
+		debug:          debug,
 	}
 }
 
@@ -30,8 +40,9 @@ func (m *Manager) debugLog(format string, args ...interface{}) {
 	}
 }
 
-// AddTrackToRoom adds a new media track to a specific room
-func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote) *webrtc.TrackLocalStaticRTP {
+// AddTrackToRoom adds a new media track to a specific room, storing the sender's
+// peer connection and remote SSRC so RTCP can be relayed back.
+func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC *webrtc.PeerConnection) *webrtc.TrackLocalStaticRTP {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -51,11 +62,34 @@ func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote) *webrtc.T
 	// Store the local track in the room
 	m.roomTracks[roomID][t.ID()] = trackLocal
 
+	// Store sender info for RTCP relay
+	if m.roomSenderInfo[roomID] == nil {
+		m.roomSenderInfo[roomID] = make(map[string]SenderInfo)
+	}
+	m.roomSenderInfo[roomID][t.ID()] = SenderInfo{
+		PC:         senderPC,
+		RemoteSSRC: uint32(t.SSRC()),
+	}
+
 	roomTrackCount := len(m.roomTracks[roomID])
-	m.debugLog("🎵 Added track to room '%s': ID=%s, StreamID=%s, Kind=%s (Room tracks: %d)",
-		roomID, t.ID(), t.StreamID(), t.Kind().String(), roomTrackCount)
+	m.debugLog("🎵 Added track to room '%s': ID=%s, StreamID=%s, Kind=%s, SSRC=%d (Room tracks: %d)",
+		roomID, t.ID(), t.StreamID(), t.Kind().String(), t.SSRC(), roomTrackCount)
 
 	return trackLocal
+}
+
+// GetSenderInfo returns the sender peer connection and remote SSRC for a track,
+// allowing RTCP packets from receivers to be relayed back to the originating sender.
+func (m *Manager) GetSenderInfo(roomID, trackID string) (SenderInfo, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	senders, exists := m.roomSenderInfo[roomID]
+	if !exists {
+		return SenderInfo{}, false
+	}
+	info, ok := senders[trackID]
+	return info, ok
 }
 
 // RemoveTrackFromRoom removes a media track from a specific room
@@ -76,8 +110,14 @@ func (m *Manager) RemoveTrackFromRoom(roomID string, t *webrtc.TrackLocalStaticR
 		return
 	}
 
-	// Remove the track from the room
+	// Remove the track and its sender info
 	delete(roomTracks, t.ID())
+	if senders := m.roomSenderInfo[roomID]; senders != nil {
+		delete(senders, t.ID())
+		if len(senders) == 0 {
+			delete(m.roomSenderInfo, roomID)
+		}
+	}
 	m.debugLog("🗑️  Removed track from room '%s': ID=%s (Remaining tracks: %d)",
 		roomID, t.ID(), len(roomTracks))
 
@@ -144,6 +184,7 @@ func (m *Manager) CleanupEmptyRooms() {
 	for roomID, tracks := range m.roomTracks {
 		if len(tracks) == 0 {
 			delete(m.roomTracks, roomID)
+			delete(m.roomSenderInfo, roomID)
 			cleanedRooms++
 			m.debugLog("🧹 Cleaned up empty track storage for room '%s'", roomID)
 		}

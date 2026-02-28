@@ -123,8 +123,8 @@ func main() {
 			log.Printf("🧊 ICE advertise IPs (srflx): %v", cfg.ICEAdvertiseIPs)
 		}
 		me := &pion.MediaEngine{}
-		if err := me.RegisterDefaultCodecs(); err != nil {
-			return fmt.Errorf("failed to register default codecs: %w", err)
+		if err := registerCodecsVP9First(me); err != nil {
+			return fmt.Errorf("failed to register codecs: %w", err)
 		}
 		webrtcAPI = pion.NewAPI(pion.WithSettingEngine(se), pion.WithMediaEngine(me))
 		return nil
@@ -247,4 +247,46 @@ func main() {
 		logger.LogAction("MAIN", "SERVER_ERROR", "", "", err.Error())
 		log.Fatalf("❌ HTTP server failed: %v", err)
 	}
+}
+
+// registerCodecsVP9First registers audio and video codecs with VP9 listed before
+// VP8 so SDP offers prefer VP9, which has better screen-content coding support.
+func registerCodecsVP9First(me *pion.MediaEngine) error {
+	audioCodecs := []pion.RTPCodecParameters{
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"}, PayloadType: 111},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeG722, ClockRate: 8000}, PayloadType: 9},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypePCMU, ClockRate: 8000}, PayloadType: 0},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypePCMA, ClockRate: 8000}, PayloadType: 8},
+	}
+	for _, c := range audioCodecs {
+		if err := me.RegisterCodec(c, pion.RTPCodecTypeAudio); err != nil {
+			return err
+		}
+	}
+
+	videoFB := []pion.RTCPFeedback{
+		{Type: "goog-remb"},
+		{Type: "ccm", Parameter: "fir"},
+		{Type: "nack"},
+		{Type: "nack", Parameter: "pli"},
+	}
+	videoCodecs := []pion.RTPCodecParameters{
+		// VP9 first for screen content coding advantage
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeVP9, ClockRate: 90000, RTCPFeedback: videoFB}, PayloadType: 98},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "profile-id=1", RTCPFeedback: videoFB}, PayloadType: 100},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: videoFB}, PayloadType: 96},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: videoFB}, PayloadType: 102},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f", RTCPFeedback: videoFB}, PayloadType: 127},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", RTCPFeedback: videoFB}, PayloadType: 125},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f", RTCPFeedback: videoFB}, PayloadType: 108},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032", RTCPFeedback: videoFB}, PayloadType: 123},
+		{RTPCodecCapability: pion.RTPCodecCapability{MimeType: pion.MimeTypeAV1, ClockRate: 90000, RTCPFeedback: videoFB}, PayloadType: 35},
+	}
+	for _, c := range videoCodecs {
+		if err := me.RegisterCodec(c, pion.RTPCodecTypeVideo); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

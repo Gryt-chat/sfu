@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/Gryt-chat/client/main/public/logo.svg" width="80" alt="Gryt logo" />
   <h1>Gryt SFU</h1>
-  <p>Selective Forwarding Unit for the <a href="https://github.com/Gryt-chat/gryt">Gryt</a> voice chat platform.<br />High-performance Go media server built with <a href="https://github.com/pion/webrtc">Pion WebRTC</a>.</p>
+  <p>Selective Forwarding Unit for the <a href="https://github.com/Gryt-chat/gryt">Gryt</a> voice &amp; video platform.<br />High-performance Go media server built with <a href="https://github.com/pion/webrtc">Pion WebRTC</a>.<br />Forwards audio, camera, and screen-share tracks with RTCP relay and VP9 preference.</p>
 </div>
 
 <br />
