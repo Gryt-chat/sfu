@@ -264,7 +264,7 @@ if [[ "$DEPLOY_BETA" =~ ^[Yy]$ ]]; then
     COMPOSE_ARGS+=(--env-file "$ENV_FILE")
     info "Pulling & restarting beta SFU…"
     docker compose "${COMPOSE_ARGS[@]}" pull sfu
-    docker compose "${COMPOSE_ARGS[@]}" up -d --force-recreate sfu
+    docker compose "${COMPOSE_ARGS[@]}" up -d --force-recreate --remove-orphans sfu
     ok "Beta SFU deployed"
   else
     warn "Beta compose files not found"
