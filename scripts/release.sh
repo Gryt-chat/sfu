@@ -248,6 +248,29 @@ gh release create "v${NEW_VERSION}" \
   $RELEASE_FLAGS
 ok "GitHub release created"
 
+# ── Deploy SFU to beta ────────────────────────────────────────────
+echo ""
+REPO_ROOT="$(cd "$PKG_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || echo "")"
+read -rp "$(echo -e "${CYAN}?${RESET}  Deploy SFU to beta? ${YELLOW}[Y/n]${RESET}: ")" DEPLOY_BETA
+DEPLOY_BETA="${DEPLOY_BETA:-Y}"
+if [[ "$DEPLOY_BETA" =~ ^[Yy]$ ]]; then
+  COMPOSE_DIR="$REPO_ROOT/ops/deploy/compose"
+  COMPOSE_FILE="$COMPOSE_DIR/beta.yml"
+  ENV_FILE="$COMPOSE_DIR/.env.beta"
+  LOCAL_FILE="$COMPOSE_DIR/beta.local.yml"
+  if [ -n "$REPO_ROOT" ] && [ -f "$COMPOSE_FILE" ] && [ -f "$ENV_FILE" ]; then
+    COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+    [[ -f "$LOCAL_FILE" ]] && COMPOSE_ARGS+=(-f "$LOCAL_FILE")
+    COMPOSE_ARGS+=(--env-file "$ENV_FILE")
+    info "Pulling & restarting beta SFU…"
+    docker compose "${COMPOSE_ARGS[@]}" pull sfu
+    docker compose "${COMPOSE_ARGS[@]}" up -d --force-recreate sfu
+    ok "Beta SFU deployed"
+  else
+    warn "Beta compose files not found"
+  fi
+fi
+
 echo ""
 ok "Release ${BOLD}v${NEW_VERSION}${RESET} complete"
 echo ""
