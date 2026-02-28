@@ -235,8 +235,12 @@ func (m *Manager) GetRoom(roomID string) (*Room, bool) {
 }
 
 // AddPeerToRoom adds a peer connection to a room and notifies the owning server.
+// If the same userID already has a connection in the room (e.g. stale connection
+// after a page refresh), the old connection is evicted first.
 func (m *Manager) AddPeerToRoom(roomID, clientID, userID string, pc *webrtc.PeerConnection, conn JSONWriter) error {
 	var serverID string
+	var evictedPC *webrtc.PeerConnection
+	var evictedConn JSONWriter
 
 	err := recovery.SafeExecuteWithContext("ROOM_MANAGER", "ADD_PEER", clientID, roomID, "Adding peer to room", func() error {
 		m.mutex.Lock()
@@ -264,6 +268,21 @@ func (m *Manager) AddPeerToRoom(roomID, clientID, userID string, pc *webrtc.Peer
 			room.mutex.Lock()
 			defer room.mutex.Unlock()
 
+			if userID != "" {
+				for oldClientID, oldUserID := range room.UserIDs {
+					if oldUserID == userID && oldClientID != clientID {
+						m.debugLog("♻️ Evicting stale peer '%s' (same user '%s') from room '%s'", oldClientID, userID, roomID)
+						evictedPC = room.PeerConnections[oldClientID]
+						evictedConn = room.Connections[oldClientID]
+						delete(room.PeerConnections, oldClientID)
+						delete(room.Connections, oldClientID)
+						delete(room.UserIDs, oldClientID)
+						delete(room.DeafenedUsers, userID)
+						break
+					}
+				}
+			}
+
 			room.PeerConnections[clientID] = pc
 			room.Connections[clientID] = conn
 			if userID != "" {
@@ -277,6 +296,18 @@ func (m *Manager) AddPeerToRoom(roomID, clientID, userID string, pc *webrtc.Peer
 			return nil
 		})
 	})
+
+	// Close evicted resources outside locks to avoid deadlocks with
+	// OnConnectionStateChange callbacks. The old handler goroutine's defers
+	// will also attempt cleanup but find the peer already removed — that's safe.
+	if evictedConn != nil {
+		if closer, ok := evictedConn.(io.Closer); ok {
+			go closer.Close()
+		}
+	}
+	if evictedPC != nil {
+		go evictedPC.Close()
+	}
 
 	if err == nil && userID != "" && serverID != "" {
 		m.notifyServer(serverID, types.EventPeerJoined, types.PeerEventData{
