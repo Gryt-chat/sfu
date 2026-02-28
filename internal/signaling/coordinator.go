@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/recovery"
@@ -222,12 +223,17 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 
 		if _, ok := existingSenders[trackID]; !ok {
 			c.debugLog("➕ Adding track %s to peer %s", trackID, clientID)
-			if _, err := peerConnection.AddTrack(localTrack); err != nil {
+			rtpSender, err := peerConnection.AddTrack(localTrack)
+			if err != nil {
 				c.debugLog("❌ Error adding track to peer connection: %v", err)
 				return err
 			}
 			tracksAdded++
 			c.debugLog("✅ Added track to peer connection in room %s: ID=%s", roomID, trackID)
+
+			if info, ok := c.trackManager.GetSenderInfo(roomID, trackID); ok {
+				go c.relayReceiverRTCP(rtpSender, info.PC, info.RemoteSSRC, clientID, trackID)
+			}
 		}
 	}
 
@@ -315,5 +321,52 @@ func (c *Coordinator) OnTrackRemovedFromRoom(roomID string) {
 		c.SignalPeerConnectionsInRoom(roomID)
 		return nil
 	})
+}
+
+// relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR/REMB
+// back to the original sender's peer connection so its congestion controller can adapt.
+func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *webrtc.PeerConnection, remoteSSRC uint32, receiverID, trackID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.debugLog("❌ Panic in RTCP relay for receiver %s track %s: %v", receiverID, trackID, r)
+		}
+	}()
+
+	for {
+		packets, _, err := rtpSender.ReadRTCP()
+		if err != nil {
+			return
+		}
+
+		if senderPC.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			return
+		}
+
+		var toRelay []rtcp.Packet
+		for _, pkt := range packets {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication:
+				toRelay = append(toRelay, &rtcp.PictureLossIndication{
+					MediaSSRC: remoteSSRC,
+				})
+			case *rtcp.FullIntraRequest:
+				toRelay = append(toRelay, &rtcp.PictureLossIndication{
+					MediaSSRC: remoteSSRC,
+				})
+			case *rtcp.ReceiverEstimatedMaximumBitrate:
+				p := pkt.(*rtcp.ReceiverEstimatedMaximumBitrate)
+				toRelay = append(toRelay, &rtcp.ReceiverEstimatedMaximumBitrate{
+					Bitrate: p.Bitrate,
+					SSRCs:   []uint32{remoteSSRC},
+				})
+			}
+		}
+
+		if len(toRelay) > 0 {
+			if writeErr := senderPC.WriteRTCP(toRelay); writeErr != nil {
+				return
+			}
+		}
+	}
 }
 
