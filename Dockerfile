@@ -13,6 +13,7 @@ RUN CGO_ENABLED=0 GOARCH=$TARGETARCH go build -trimpath \
     -o sfu ./cmd/sfu
 
 FROM alpine:3
+RUN apk add --no-cache wget
 COPY --from=builder /app/sfu /usr/local/bin/sfu
 
 RUN addgroup -g 1001 -S gryt && adduser -S gryt -u 1001 -G gryt
