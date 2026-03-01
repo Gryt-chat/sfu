@@ -31,9 +31,10 @@ type Config struct {
 
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		log.Printf("Warning: Error loading .env file: %v", err)
+	if err := godotenv.Load("config.env"); err != nil {
+		if err2 := godotenv.Load(); err2 != nil {
+			log.Printf("Warning: No config.env or .env file found: %v", err2)
+		}
 	}
 
 	port := os.Getenv("SFU_PORT")
