@@ -149,6 +149,17 @@ func (m *Manager) GetTracksInRoom(roomID string) map[string]*webrtc.TrackLocalSt
 	return tracks
 }
 
+// HasTrack checks whether a track with the given ID exists in a room
+func (m *Manager) HasTrack(roomID, trackID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if roomTracks, ok := m.roomTracks[roomID]; ok {
+		_, exists := roomTracks[trackID]
+		return exists
+	}
+	return false
+}
+
 // GetTrackInRoom returns a specific track by ID from a specific room
 func (m *Manager) GetTrackInRoom(roomID, trackID string) (*webrtc.TrackLocalStaticRTP, bool) {
 	m.mu.RLock()
