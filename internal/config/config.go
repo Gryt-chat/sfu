@@ -36,7 +36,10 @@ func Load() (*Config, error) {
 		log.Printf("Warning: Error loading .env file: %v", err)
 	}
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SFU_PORT")
+	if port == "" {
+		port = os.Getenv("PORT")
+	}
 	if port == "" {
 		port = "5005"
 	}
