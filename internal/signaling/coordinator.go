@@ -151,11 +151,12 @@ func (c *Coordinator) SignalPeerConnectionsInRoom(roomID string) {
 func (c *Coordinator) processPeerConnection(clientID string, peerConnection *webrtc.PeerConnection, wsConn interface{}, tracks map[string]*webrtc.TrackLocalStaticRTP, roomID string) error {
 	// Check signaling state FIRST. If not stable, skip this peer entirely so
 	// that tracks are not "consumed" (added as senders) without an offer being
-	// sent. They will be added on the next call when signaling is stable.
+	// sent. Return an error so the retry loop re-attempts after a backoff,
+	// which gives the peer time to answer and return to stable state.
 	signalingState := peerConnection.SignalingState()
 	if signalingState != webrtc.SignalingStateStable {
-		c.debugLog("⏳ Skipping peer %s, signaling state: %v (will retry after answer)", clientID, signalingState)
-		return nil
+		c.debugLog("⏳ Skipping peer %s, signaling state: %v (will retry after backoff)", clientID, signalingState)
+		return fmt.Errorf("peer %s signaling not stable (%v)", clientID, signalingState)
 	}
 
 	// Server-side deafen: filter out audio tracks so the SFU stops forwarding them.
