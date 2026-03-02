@@ -3,9 +3,7 @@ package websocket
 import (
 	"fmt"
 	"net/http"
-	"time"
 
-	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/metrics"
@@ -210,7 +208,11 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 		})
 	})
 
-	// Handle incoming tracks with recovery
+	// Handle incoming tracks with recovery.
+	// The LayerForwarder (created inside AddTrackToRoom) handles all RTP
+	// forwarding including SVC layer filtering, so we no longer need a
+	// separate forwardRTPPackets goroutine. We block here until the remote
+	// track ends so the deferred cleanup fires at the right time.
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
@@ -230,62 +232,40 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 				})
 			}()
 
-			h.debugLog("🎵 Created local track for forwarding from %s", clientID)
+			h.debugLog("🎵 Created local track with LayerForwarder for %s", clientID)
 			metrics.TracksActive.Inc()
 			h.coordinator.OnTrackAddedToRoom(roomID)
 
-			return h.forwardRTPPackets(t, trackLocal, clientID, peerConnection)
+			// Block until the peer connection closes. The LayerForwarder
+			// goroutine reads from the remote track; when the PC closes
+			// the track read will error out and the forwarder stops. We
+			// wait here so the deferred cleanup runs at the correct time.
+			<-waitForPCClose(peerConnection)
+			return nil
 		})
 	})
 }
 
-// forwardRTPPackets forwards RTP packets from remote track to local track.
-// For video tracks, it also sends periodic PLI (Picture Loss Indication)
-// RTCP packets so the sender emits keyframes that new receivers need to
-// decode the stream (without this, late-joining receivers see black video).
-func (h *Handler) forwardRTPPackets(remoteTrack *webrtc.TrackRemote, localTrack *webrtc.TrackLocalStaticRTP, clientID string, pc *webrtc.PeerConnection) (retErr error) {
-	defer func() {
-		if r := recover(); r != nil {
-			retErr = fmt.Errorf("panic in RTP forwarding for %s: %v", clientID, r)
-			recovery.GetLogger().LogAction("WEBRTC", "RTP_FORWARD_PANIC", clientID, "", fmt.Sprintf("%v", r))
-		}
-	}()
-
-	if remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
-		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
-					return
-				}
-				if writeErr := pc.WriteRTCP([]rtcp.Packet{
-					&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
-				}); writeErr != nil {
-					return
-				}
+// waitForPCClose returns a channel that closes when the peer connection
+// reaches the Closed or Failed state.
+func waitForPCClose(pc *webrtc.PeerConnection) <-chan struct{} {
+	ch := make(chan struct{})
+	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateFailed {
+			select {
+			case <-ch:
+			default:
+				close(ch)
 			}
-		}()
-	}
-
-	buf := make([]byte, 1500)
-	rtpPacketCount := 0
-
-	for {
-		i, _, readErr := remoteTrack.Read(buf)
-		if readErr != nil {
-			h.debugLog("🎵 Track read ended for %s: %v", clientID, readErr)
-			return readErr
 		}
-
-		if _, writeErr := localTrack.Write(buf[:i]); writeErr != nil {
-			h.debugLog("❌ Track write error for %s: %v", clientID, writeErr)
-			return writeErr
-		}
-
-		rtpPacketCount++
-		if h.config.VerboseLog && rtpPacketCount%1000 == 0 {
-			h.debugLog("🎵 Forwarded %d RTP packets from %s", rtpPacketCount, clientID)
+	})
+	// If already closed, signal immediately.
+	if st := pc.ConnectionState(); st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateFailed {
+		select {
+		case <-ch:
+		default:
+			close(ch)
 		}
 	}
+	return ch
 }

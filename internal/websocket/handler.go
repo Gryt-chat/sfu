@@ -319,6 +319,8 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 						return nil
 					}
 					return h.handleRenegotiate(peerConnection, conn, clientID, roomID)
+				case types.EventSetLayer:
+					return h.handleSetLayer(message.Data, clientID, roomID)
 				case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from %s", clientID)
@@ -411,6 +413,26 @@ func (h *Handler) handleRenegotiate(peerConnection *webrtc.PeerConnection, conn 
 		Event: types.EventOffer,
 		Data:  string(offerJSON),
 	})
+}
+
+// handleSetLayer processes a set_layer message to manually set the max temporal
+// layer a receiver subscribes to for a given track.
+func (h *Handler) handleSetLayer(data, clientID, roomID string) error {
+	var req types.SetLayerData
+	if err := recovery.SafeJSONUnmarshal([]byte(data), &req); err != nil {
+		h.debugLog("❌ Error unmarshalling set_layer data from %s: %v", clientID, err)
+		return nil
+	}
+
+	lf, ok := h.trackManager.GetForwarder(roomID, req.TrackID)
+	if !ok {
+		h.debugLog("⚠️ set_layer: no forwarder for track %s in room %s", req.TrackID, roomID)
+		return nil
+	}
+
+	lf.SetMaxTemporalLayer(clientID, req.MaxTemporalLayer)
+	h.debugLog("📊 set_layer: client %s track %s → maxTemporal=%d", clientID, req.TrackID, req.MaxTemporalLayer)
+	return nil
 }
 
 // sendErrorToConnection sends an error message to a WebSocket connection

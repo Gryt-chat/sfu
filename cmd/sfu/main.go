@@ -294,5 +294,15 @@ func registerCodecsVP9First(me *pion.MediaEngine) error {
 		}
 	}
 
+	// Dependency Descriptor RTP header extension for SVC layer-aware forwarding.
+	// Browsers include this when encoding with scalabilityMode (e.g. L1T3).
+	const ddExtensionURI = "https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension"
+	if err := me.RegisterHeaderExtension(
+		pion.RTPHeaderExtensionCapability{URI: ddExtensionURI},
+		pion.RTPCodecTypeVideo,
+	); err != nil {
+		return fmt.Errorf("failed to register DD header extension: %w", err)
+	}
+
 	return nil
 }

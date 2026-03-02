@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/pion/webrtc/v4"
+
+	"sfu-v2/internal/svc"
 )
 
 // SenderInfo holds the originating peer connection and remote SSRC for a track,
@@ -21,6 +23,8 @@ type Manager struct {
 	roomTracks map[string]map[string]*webrtc.TrackLocalStaticRTP
 	// Map of roomID -> trackID -> sender info (peer connection + SSRC)
 	roomSenderInfo map[string]map[string]SenderInfo
+	// Map of roomID -> trackID -> LayerForwarder (SVC-aware forwarding)
+	roomForwarders map[string]map[string]*svc.LayerForwarder
 	debug          bool
 }
 
@@ -29,6 +33,7 @@ func NewManager(debug bool) *Manager {
 	return &Manager{
 		roomTracks:     make(map[string]map[string]*webrtc.TrackLocalStaticRTP),
 		roomSenderInfo: make(map[string]map[string]SenderInfo),
+		roomForwarders: make(map[string]map[string]*svc.LayerForwarder),
 		debug:          debug,
 	}
 }
@@ -42,6 +47,9 @@ func (m *Manager) debugLog(format string, args ...interface{}) {
 
 // AddTrackToRoom adds a new media track to a specific room, storing the sender's
 // peer connection and remote SSRC so RTCP can be relayed back.
+// It creates a LayerForwarder that handles per-receiver fanout with optional
+// SVC temporal layer filtering. The returned TrackLocalStaticRTP is a legacy
+// fallback — callers should prefer GetForwarder for SVC-aware forwarding.
 func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC *webrtc.PeerConnection) *webrtc.TrackLocalStaticRTP {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -70,6 +78,13 @@ func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC 
 		PC:         senderPC,
 		RemoteSSRC: uint32(t.SSRC()),
 	}
+
+	// Create a LayerForwarder for SVC-aware per-receiver forwarding.
+	if m.roomForwarders[roomID] == nil {
+		m.roomForwarders[roomID] = make(map[string]*svc.LayerForwarder)
+	}
+	lf := svc.NewLayerForwarder(t, senderPC, m.debug)
+	m.roomForwarders[roomID][t.ID()] = lf
 
 	roomTrackCount := len(m.roomTracks[roomID])
 	m.debugLog("🎵 Added track to room '%s': ID=%s, StreamID=%s, Kind=%s, SSRC=%d (Room tracks: %d)",
@@ -108,6 +123,17 @@ func (m *Manager) RemoveTrackFromRoom(roomID string, t *webrtc.TrackLocalStaticR
 	if t == nil || roomTracks[t.ID()] == nil {
 		m.debugLog("❌ Track or track ID not found in room '%s'", roomID)
 		return
+	}
+
+	// Stop and remove the layer forwarder
+	if fwds := m.roomForwarders[roomID]; fwds != nil {
+		if lf, ok := fwds[t.ID()]; ok {
+			lf.Stop()
+			delete(fwds, t.ID())
+		}
+		if len(fwds) == 0 {
+			delete(m.roomForwarders, roomID)
+		}
 	}
 
 	// Remove the track and its sender info
@@ -186,6 +212,32 @@ func (m *Manager) GetRoomStats() map[string]int {
 	return stats
 }
 
+// GetForwarder returns the LayerForwarder for a track in a room.
+func (m *Manager) GetForwarder(roomID, trackID string) (*svc.LayerForwarder, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if fwds, ok := m.roomForwarders[roomID]; ok {
+		lf, exists := fwds[trackID]
+		return lf, exists
+	}
+	return nil, false
+}
+
+// GetForwardersInRoom returns all LayerForwarders for tracks in a room.
+func (m *Manager) GetForwardersInRoom(roomID string) map[string]*svc.LayerForwarder {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	fwds, exists := m.roomForwarders[roomID]
+	if !exists {
+		return nil
+	}
+	result := make(map[string]*svc.LayerForwarder, len(fwds))
+	for id, lf := range fwds {
+		result[id] = lf
+	}
+	return result
+}
+
 // CleanupEmptyRooms removes track storage for rooms with no tracks
 func (m *Manager) CleanupEmptyRooms() {
 	m.mu.Lock()
@@ -196,6 +248,12 @@ func (m *Manager) CleanupEmptyRooms() {
 		if len(tracks) == 0 {
 			delete(m.roomTracks, roomID)
 			delete(m.roomSenderInfo, roomID)
+			if fwds, ok := m.roomForwarders[roomID]; ok {
+				for _, lf := range fwds {
+					lf.Stop()
+				}
+				delete(m.roomForwarders, roomID)
+			}
 			cleanedRooms++
 			m.debugLog("🧹 Cleaned up empty track storage for room '%s'", roomID)
 		}

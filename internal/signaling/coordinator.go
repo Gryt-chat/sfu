@@ -147,36 +147,37 @@ func (c *Coordinator) SignalPeerConnectionsInRoom(roomID string) {
 	})
 }
 
-// processPeerConnection handles the signaling for a single peer connection
+// processPeerConnection handles the signaling for a single peer connection.
+// It uses LayerForwarder to provide per-receiver tracks with SVC layer filtering.
 func (c *Coordinator) processPeerConnection(clientID string, peerConnection *webrtc.PeerConnection, wsConn interface{}, tracks map[string]*webrtc.TrackLocalStaticRTP, roomID string) error {
-	// Check signaling state FIRST. If not stable, skip this peer entirely so
-	// that tracks are not "consumed" (added as senders) without an offer being
-	// sent. Return an error so the retry loop re-attempts after a backoff,
-	// which gives the peer time to answer and return to stable state.
 	signalingState := peerConnection.SignalingState()
 	if signalingState != webrtc.SignalingStateStable {
 		c.debugLog("⏳ Skipping peer %s, signaling state: %v (will retry after backoff)", clientID, signalingState)
 		return fmt.Errorf("peer %s signaling not stable (%v)", clientID, signalingState)
 	}
 
-	// Server-side deafen: filter out audio tracks so the SFU stops forwarding them.
-	if c.roomManager.IsUserDeafened(roomID, clientID) {
-		filtered := make(map[string]*webrtc.TrackLocalStaticRTP, len(tracks))
-		for id, t := range tracks {
-			if t != nil && t.Kind() != webrtc.RTPCodecTypeAudio {
-				filtered[id] = t
-			}
+	isDeafened := c.roomManager.IsUserDeafened(roomID, clientID)
+
+	// Build the set of track IDs this peer should receive.
+	wantedTrackIDs := make(map[string]bool, len(tracks))
+	for id, t := range tracks {
+		if t == nil {
+			continue
 		}
-		c.debugLog("🔇 Peer %s is deafened, filtered %d audio track(s)", clientID, len(tracks)-len(filtered))
-		tracks = filtered
+		if isDeafened && t.Kind() == webrtc.RTPCodecTypeAudio {
+			continue
+		}
+		wantedTrackIDs[id] = true
+	}
+	if isDeafened {
+		c.debugLog("🔇 Peer %s is deafened, reduced to %d tracks", clientID, len(wantedTrackIDs))
 	}
 
-	// Map of senders we are already using to avoid duplicates
+	// Map of senders we are already using to avoid duplicates.
 	existingSenders := map[string]bool{}
 	senderCount := 0
 	tracksRemoved := 0
 
-	// Check existing senders with nil protection
 	senders := peerConnection.GetSenders()
 	if senders != nil {
 		for _, sender := range senders {
@@ -187,8 +188,7 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 			senderCount++
 			existingSenders[sender.Track().ID()] = true
 
-			// If a sender's track is not in our list of room tracks, remove it
-			if _, ok := tracks[sender.Track().ID()]; !ok {
+			if !wantedTrackIDs[sender.Track().ID()] {
 				c.debugLog("🗑️  Removing obsolete sender track %s from peer %s", sender.Track().ID(), clientID)
 				if err := peerConnection.RemoveTrack(sender); err != nil {
 					c.debugLog("❌ Error removing sender track: %v", err)
@@ -199,7 +199,7 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		}
 	}
 
-	// Avoid receiving tracks we are sending to prevent loopback
+	// Avoid receiving tracks we are sending to prevent loopback.
 	receiverCount := 0
 	receivers := peerConnection.GetReceivers()
 	if receivers != nil {
@@ -214,27 +214,41 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 
 	c.debugLog("🔗 Peer %s has %d senders, %d receivers", clientID, senderCount, receiverCount)
 
-	// Add any missing local tracks to the peer connection
+	// Add any missing tracks to the peer connection.
 	tracksAdded := 0
-	for trackID, localTrack := range tracks {
-		if localTrack == nil {
-			c.debugLog("⚠️ Nil track found for ID %s, skipping", trackID)
+	for trackID := range wantedTrackIDs {
+		if existingSenders[trackID] {
 			continue
 		}
 
-		if _, ok := existingSenders[trackID]; !ok {
-			c.debugLog("➕ Adding track %s to peer %s", trackID, clientID)
-			rtpSender, err := peerConnection.AddTrack(localTrack)
-			if err != nil {
-				c.debugLog("❌ Error adding track to peer connection: %v", err)
-				return err
-			}
-			tracksAdded++
-			c.debugLog("✅ Added track to peer connection in room %s: ID=%s", roomID, trackID)
+		// Try to get a per-receiver track from the LayerForwarder.
+		var localTrack *webrtc.TrackLocalStaticRTP
+		if lf, ok := c.trackManager.GetForwarder(roomID, trackID); ok {
+			localTrack = lf.AddReceiver(clientID, -1)
+		}
 
-			if info, ok := c.trackManager.GetSenderInfo(roomID, trackID); ok {
-				go c.relayReceiverRTCP(rtpSender, info.PC, info.RemoteSSRC, clientID, trackID)
-			}
+		// Fallback to the shared track if no forwarder is available.
+		if localTrack == nil {
+			localTrack = tracks[trackID]
+		}
+		if localTrack == nil {
+			c.debugLog("⚠️ Nil track for ID %s, skipping", trackID)
+			continue
+		}
+
+		c.debugLog("➕ Adding track %s to peer %s", trackID, clientID)
+		rtpSender, err := peerConnection.AddTrack(localTrack)
+		if err != nil {
+			c.debugLog("❌ Error adding track to peer connection: %v", err)
+			return err
+		}
+		tracksAdded++
+		c.debugLog("✅ Added track to peer connection in room %s: ID=%s", roomID, trackID)
+
+		if lf, ok := c.trackManager.GetForwarder(roomID, trackID); ok {
+			go c.relayReceiverRTCP(rtpSender, lf.GetSenderPC(), lf.GetRemoteSSRC(), clientID, trackID)
+		} else if info, ok := c.trackManager.GetSenderInfo(roomID, trackID); ok {
+			go c.relayReceiverRTCP(rtpSender, info.PC, info.RemoteSSRC, clientID, trackID)
 		}
 	}
 
@@ -242,10 +256,6 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		c.debugLog("➕ Added %d tracks to peer %s", tracksAdded, clientID)
 	}
 
-	// Always send an initial offer to a newly connected peer so the WebRTC
-	// transport is established and the SFU can receive the client's audio
-	// via the recvonly transceiver. For already-established connections,
-	// only renegotiate when tracks actually changed.
 	isNewPeer := peerConnection.ConnectionState() == webrtc.PeerConnectionStateNew
 	if tracksAdded == 0 && tracksRemoved == 0 && !isNewPeer {
 		c.debugLog("🔗 No track changes for peer %s, skipping offer", clientID)
@@ -256,7 +266,6 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		c.debugLog("🆕 New peer %s — sending initial offer to establish transport", clientID)
 	}
 
-	// Log transceiver state before creating offer
 	transceivers := peerConnection.GetTransceivers()
 	c.debugLog("📋 Peer %s has %d transceivers before CreateOffer:", clientID, len(transceivers))
 	for i, t := range transceivers {
@@ -284,7 +293,6 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		return err
 	}
 
-	// Safe JSON marshaling
 	offerString, err := recovery.SafeJSONMarshal(offer)
 	if err != nil {
 		c.debugLog("❌ Error marshalling offer for %s: %v", clientID, err)
@@ -293,9 +301,7 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 
 	c.debugLog("📤 Sending offer to peer %s (%d bytes)", clientID, len(offerString))
 
-	// Send message with type assertion and nil check
 	return recovery.SafeExecuteWithContext("SIGNALING", "SEND_OFFER", clientID, roomID, "Sending WebRTC offer", func() error {
-		// Type assert the WebSocket connection
 		if conn, ok := wsConn.(interface{ WriteJSON(interface{}) error }); ok && conn != nil {
 			return conn.WriteJSON(&types.WebSocketMessage{
 				Event: types.EventOffer,
@@ -326,6 +332,7 @@ func (c *Coordinator) OnTrackRemovedFromRoom(roomID string) {
 
 // relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR/REMB
 // back to the original sender's peer connection so its congestion controller can adapt.
+// It also adjusts the receiver's SVC temporal layer subscription based on REMB bitrate.
 func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *webrtc.PeerConnection, remoteSSRC uint32, receiverID, trackID string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -345,7 +352,7 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 
 		var toRelay []rtcp.Packet
 		for _, pkt := range packets {
-			switch pkt.(type) {
+			switch p := pkt.(type) {
 			case *rtcp.PictureLossIndication:
 				toRelay = append(toRelay, &rtcp.PictureLossIndication{
 					MediaSSRC: remoteSSRC,
@@ -355,11 +362,12 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 					MediaSSRC: remoteSSRC,
 				})
 			case *rtcp.ReceiverEstimatedMaximumBitrate:
-				p := pkt.(*rtcp.ReceiverEstimatedMaximumBitrate)
 				toRelay = append(toRelay, &rtcp.ReceiverEstimatedMaximumBitrate{
 					Bitrate: p.Bitrate,
 					SSRCs:   []uint32{remoteSSRC},
 				})
+
+				c.adaptTemporalLayerFromREMB(receiverID, trackID, p.Bitrate)
 			}
 		}
 
@@ -368,6 +376,40 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 				return
 			}
 		}
+	}
+}
+
+// adaptTemporalLayerFromREMB adjusts the receiver's temporal layer subscription
+// in the LayerForwarder based on the REMB bitrate estimate.
+//
+// For L1T3 (3 temporal layers at 30fps):
+//   - T0 only   (~7.5fps) when REMB < 1 Mbps
+//   - T0+T1     (~15fps)  when REMB < 3 Mbps
+//   - All layers (~30fps)  otherwise
+func (c *Coordinator) adaptTemporalLayerFromREMB(receiverID, trackID string, rembBps float32) {
+	// Look through all rooms for this track's forwarder.
+	// This is a simplification; in a large deployment you'd index by room.
+	rooms := c.trackManager.GetRoomStats()
+	for roomID := range rooms {
+		lf, ok := c.trackManager.GetForwarder(roomID, trackID)
+		if !ok || !lf.HasReceiver(receiverID) {
+			continue
+		}
+
+		var newLayer int
+		switch {
+		case rembBps < 1_000_000:
+			newLayer = 0 // T0 only
+		case rembBps < 3_000_000:
+			newLayer = 1 // T0+T1
+		default:
+			newLayer = -1 // all layers (no filtering)
+		}
+
+		lf.SetMaxTemporalLayer(receiverID, newLayer)
+		c.debugLog("📊 REMB %.0f bps → receiver %s track %s → maxTemporal=%d",
+			rembBps, receiverID, trackID, newLayer)
+		return
 	}
 }
 
