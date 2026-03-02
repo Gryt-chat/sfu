@@ -63,6 +63,12 @@ type AudioControlData struct {
 	IsDeafened     bool   `json:"is_deafened"`
 }
 
+// SetLayerData lets a client manually set the max temporal layer for a track.
+type SetLayerData struct {
+	TrackID          string `json:"track_id"`
+	MaxTemporalLayer int    `json:"max_temporal_layer"` // -1 = all layers, 0 = T0 only, 1 = T0+T1, 2 = T0+T1+T2
+}
+
 // Supported WebSocket message events
 const (
 	EventOffer            = "offer"
@@ -80,4 +86,5 @@ const (
 	EventRenegotiate      = "renegotiate"
 	EventSyncRequest      = "sync_request"
 	EventSyncResponse     = "sync_response"
+	EventSetLayer         = "set_layer"
 )
