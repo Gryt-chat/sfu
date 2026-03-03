@@ -330,9 +330,16 @@ func (c *Coordinator) OnTrackRemovedFromRoom(roomID string) {
 	})
 }
 
-// relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR/REMB
-// back to the original sender's peer connection so its congestion controller can adapt.
-// It also adjusts the receiver's SVC temporal layer subscription based on REMB bitrate.
+// relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR
+// back to the original sender's peer connection so it can generate keyframes.
+//
+// REMB from receivers is used ONLY for SVC temporal layer selection — it is NOT
+// relayed to the sender. The sender's congestion controller gets proper feedback
+// via the TWCC interceptor (transport-cc) which estimates the sender→SFU link
+// capacity independently.  Relaying receiver REMB would override the sender's
+// GCC estimate (Chrome uses min of GCC and REMB), throttling the encoder to the
+// slowest receiver's bandwidth — even for H.264 where no SVC adaptation is
+// possible on the SFU side.
 func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *webrtc.PeerConnection, remoteSSRC uint32, receiverID, trackID string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -362,11 +369,6 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 					MediaSSRC: remoteSSRC,
 				})
 			case *rtcp.ReceiverEstimatedMaximumBitrate:
-				toRelay = append(toRelay, &rtcp.ReceiverEstimatedMaximumBitrate{
-					Bitrate: p.Bitrate,
-					SSRCs:   []uint32{remoteSSRC},
-				})
-
 				c.adaptTemporalLayerFromREMB(receiverID, trackID, p.Bitrate)
 			}
 		}
@@ -380,15 +382,17 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 }
 
 // adaptTemporalLayerFromREMB adjusts the receiver's temporal layer subscription
-// in the LayerForwarder based on the REMB bitrate estimate.
+// in the LayerForwarder based on the REMB bitrate estimate from the receiver.
 //
-// For L1T3 (3 temporal layers at 30fps):
-//   - T0 only   (~7.5fps) when REMB < 1 Mbps
-//   - T0+T1     (~15fps)  when REMB < 3 Mbps
-//   - All layers (~30fps)  otherwise
+// For L1T3 (3 temporal layers):
+//   - T0 only   (quarter FPS) when REMB <  2 Mbps
+//   - T0+T1     (half FPS)    when REMB <  6 Mbps
+//   - All layers (full FPS)    otherwise
+//
+// These thresholds are tuned for high-quality screen sharing (720p–4K).
+// At 4K the sender may encode at 6–20 Mbps, so conservative thresholds
+// would cap receivers at T0/T1 even when they have plenty of bandwidth.
 func (c *Coordinator) adaptTemporalLayerFromREMB(receiverID, trackID string, rembBps float32) {
-	// Look through all rooms for this track's forwarder.
-	// This is a simplification; in a large deployment you'd index by room.
 	rooms := c.trackManager.GetRoomStats()
 	for roomID := range rooms {
 		lf, ok := c.trackManager.GetForwarder(roomID, trackID)
@@ -398,9 +402,9 @@ func (c *Coordinator) adaptTemporalLayerFromREMB(receiverID, trackID string, rem
 
 		var newLayer int
 		switch {
-		case rembBps < 1_000_000:
+		case rembBps < 2_000_000:
 			newLayer = 0 // T0 only
-		case rembBps < 3_000_000:
+		case rembBps < 6_000_000:
 			newLayer = 1 // T0+T1
 		default:
 			newLayer = -1 // all layers (no filtering)
