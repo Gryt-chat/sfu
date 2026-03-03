@@ -333,13 +333,11 @@ func (c *Coordinator) OnTrackRemovedFromRoom(roomID string) {
 // relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR
 // back to the original sender's peer connection so it can generate keyframes.
 //
-// REMB from receivers is used ONLY for SVC temporal layer selection — it is NOT
-// relayed to the sender. The sender's congestion controller gets proper feedback
-// via the TWCC interceptor (transport-cc) which estimates the sender→SFU link
-// capacity independently.  Relaying receiver REMB would override the sender's
-// GCC estimate (Chrome uses min of GCC and REMB), throttling the encoder to the
-// slowest receiver's bandwidth — even for H.264 where no SVC adaptation is
-// possible on the SFU side.
+// REMB is intentionally NOT relayed to the sender and NOT used for temporal
+// layer adaptation. The sender's congestion controller gets proper feedback via
+// the TWCC interceptor (transport-cc) which estimates the sender→SFU link
+// independently. All SVC temporal layers are forwarded to every receiver so the
+// configured FPS is locked — no dynamic frame-rate reduction.
 func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *webrtc.PeerConnection, remoteSSRC uint32, receiverID, trackID string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -359,7 +357,7 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 
 		var toRelay []rtcp.Packet
 		for _, pkt := range packets {
-			switch p := pkt.(type) {
+			switch pkt.(type) {
 			case *rtcp.PictureLossIndication:
 				toRelay = append(toRelay, &rtcp.PictureLossIndication{
 					MediaSSRC: remoteSSRC,
@@ -368,8 +366,6 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 				toRelay = append(toRelay, &rtcp.PictureLossIndication{
 					MediaSSRC: remoteSSRC,
 				})
-			case *rtcp.ReceiverEstimatedMaximumBitrate:
-				c.adaptTemporalLayerFromREMB(receiverID, trackID, p.Bitrate)
 			}
 		}
 
@@ -378,42 +374,6 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 				return
 			}
 		}
-	}
-}
-
-// adaptTemporalLayerFromREMB adjusts the receiver's temporal layer subscription
-// in the LayerForwarder based on the REMB bitrate estimate from the receiver.
-//
-// For L1T3 (3 temporal layers):
-//   - T0 only   (quarter FPS) when REMB <  2 Mbps
-//   - T0+T1     (half FPS)    when REMB <  6 Mbps
-//   - All layers (full FPS)    otherwise
-//
-// These thresholds are tuned for high-quality screen sharing (720p–4K).
-// At 4K the sender may encode at 6–20 Mbps, so conservative thresholds
-// would cap receivers at T0/T1 even when they have plenty of bandwidth.
-func (c *Coordinator) adaptTemporalLayerFromREMB(receiverID, trackID string, rembBps float32) {
-	rooms := c.trackManager.GetRoomStats()
-	for roomID := range rooms {
-		lf, ok := c.trackManager.GetForwarder(roomID, trackID)
-		if !ok || !lf.HasReceiver(receiverID) {
-			continue
-		}
-
-		var newLayer int
-		switch {
-		case rembBps < 2_000_000:
-			newLayer = 0 // T0 only
-		case rembBps < 6_000_000:
-			newLayer = 1 // T0+T1
-		default:
-			newLayer = -1 // all layers (no filtering)
-		}
-
-		lf.SetMaxTemporalLayer(receiverID, newLayer)
-		c.debugLog("📊 REMB %.0f bps → receiver %s track %s → maxTemporal=%d",
-			rembBps, receiverID, trackID, newLayer)
-		return
 	}
 }
 
