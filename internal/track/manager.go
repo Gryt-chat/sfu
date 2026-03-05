@@ -86,9 +86,10 @@ func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC 
 	lf := svc.NewLayerForwarder(t, senderPC, m.debug)
 	m.roomForwarders[roomID][t.ID()] = lf
 
+	codec := t.Codec()
 	roomTrackCount := len(m.roomTracks[roomID])
-	m.debugLog("🎵 Added track to room '%s': ID=%s, StreamID=%s, Kind=%s, SSRC=%d (Room tracks: %d)",
-		roomID, t.ID(), t.StreamID(), t.Kind().String(), t.SSRC(), roomTrackCount)
+	m.debugLog("🎵 Added track to room '%s': ID=%s, StreamID=%s, Kind=%s, Codec=%s, SSRC=%d (Room tracks: %d)",
+		roomID, t.ID(), t.StreamID(), t.Kind().String(), codec.MimeType, t.SSRC(), roomTrackCount)
 
 	return trackLocal
 }
@@ -263,4 +264,3 @@ func (m *Manager) CleanupEmptyRooms() {
 		m.debugLog("🧹 Cleaned up %d empty room track storages", cleanedRooms)
 	}
 }
-
