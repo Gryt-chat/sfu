@@ -14,6 +14,7 @@ import (
 
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/metrics"
+	"sfu-v2/internal/readiness"
 	"sfu-v2/internal/recovery"
 	"sfu-v2/internal/room"
 	"sfu-v2/internal/signaling"
@@ -139,6 +140,11 @@ func main() {
 		log.Fatalf("❌ Failed to initialize WebRTC API: %v", err)
 	}
 
+	// Verify UDP connectivity before reporting healthy. This gates the
+	// /health endpoint so Docker Compose waits for the networking stack to
+	// be fully operational before starting dependent services.
+	readiness.VerifyUDP(cfg.STUNServers, cfg.DisableSTUN)
+
 	// Initialize room manager with recovery
 	err = recovery.SafeExecute("MAIN", "INIT_ROOM_MANAGER", func() error {
 		roomManager = room.NewManager(cfg.Debug)
@@ -191,8 +197,14 @@ func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		ts := time.Now().Format(time.RFC3339)
+		if !readiness.IsUDPReady() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, `{"status":"starting","detail":"verifying UDP connectivity","service":"sfu","version":"%s","timestamp":"%s"}`, Version, ts)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"healthy","service":"sfu","version":"` + Version + `","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+		fmt.Fprintf(w, `{"status":"healthy","service":"sfu","version":"%s","timestamp":"%s"}`, Version, ts)
 	})
 
 	http.Handle("/metrics", promhttp.Handler())
