@@ -3,7 +3,8 @@ ARG TARGETARCH
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    for i in 1 2 3; do go mod download && break || sleep 5; done
 
 COPY . .
 
