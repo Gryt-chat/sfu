@@ -3,12 +3,13 @@ ARG TARGETARCH
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
 ARG VERSION=1.0.0
-RUN CGO_ENABLED=0 GOARCH=$TARGETARCH go build -trimpath \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION}" \
     -o sfu ./cmd/sfu
 
