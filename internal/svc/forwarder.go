@@ -266,9 +266,10 @@ func (lf *LayerForwarder) extractTemporalID(h *rtp.Header) int {
 	return -1
 }
 
-// periodicPLI sends PLI every 5 seconds to the sender for video tracks.
+// periodicPLI sends PLI every 2 seconds to the sender for video tracks.
+// Shorter intervals improve keyframe recovery for high-fps screen shares.
 func (lf *LayerForwarder) periodicPLI() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
