@@ -36,6 +36,7 @@ See `env.example` for all options. Key variables:
 | `ICE_UDP_PORT_MIN` | — | Min UDP port for WebRTC media |
 | `ICE_UDP_PORT_MAX` | — | Max UDP port for WebRTC media |
 | `ICE_ADVERTISE_IP` | — | Advertised IP for NAT traversal |
+| `PROXY` | `false` | Prefer first `X-Forwarded-For` hop for client IP in logs (trusted reverse proxy only) |
 
 ## Documentation
 

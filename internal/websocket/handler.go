@@ -69,7 +69,8 @@ func generateClientID() string {
 
 // HandleWebSocket handles incoming WebSocket connections
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONNECTION", "", "", r.RemoteAddr, func() error {
+	remoteAddr := h.config.ClientRemoteAddr(r)
+	recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONNECTION", "", "", remoteAddr, func() error {
 		unsafeConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			if h.config.Debug {
@@ -91,7 +92,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		clientID := generateClientID()
 		parsedURL, _ := url.Parse(r.RequestURI)
 
-		h.debugLog("🔌 New WebSocket connection: %s (Path: %s, RemoteAddr: %s)", clientID, parsedURL.Path, r.RemoteAddr)
+		h.debugLog("🔌 New WebSocket connection: %s (Path: %s, RemoteAddr: %s)", clientID, parsedURL.Path, remoteAddr)
 
 		switch parsedURL.Path {
 		case "/server":

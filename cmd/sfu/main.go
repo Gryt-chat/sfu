@@ -58,8 +58,11 @@ func main() {
 	log.Printf("┌%s┐", border)
 	log.Printf("│  %s  │", banner)
 	log.Printf("└%s┘", border)
-	log.Printf("📊 Configuration: Port=%s, Debug=%t, VerboseLog=%t", cfg.Port, cfg.Debug, cfg.VerboseLog)
+	log.Printf("📊 Configuration: Port=%s, Debug=%t, VerboseLog=%t, Proxy=%t", cfg.Port, cfg.Debug, cfg.VerboseLog, cfg.Proxy)
 	log.Printf("🧊 ICE Servers: %v", cfg.STUNServers)
+	if cfg.Proxy {
+		log.Printf("🔀 Proxy mode enabled — client IP from X-Forwarded-For (trusted reverse proxy only)")
+	}
 
 	if cfg.Debug {
 		log.Printf("🔍 Debug mode enabled - detailed logging active")
@@ -228,14 +231,14 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a WebSocket upgrade request
 		if r.Header.Get("Upgrade") == "websocket" && r.Header.Get("Connection") != "" {
-			recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONNECTION", "", "", r.RemoteAddr, func() error {
+			recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONNECTION", "", "", cfg.ClientRemoteAddr(r), func() error {
 				wsHandler.HandleWebSocket(w, r)
 				return nil
 			})
 		} else {
 			// Handle non-WebSocket requests (health checks, monitoring, etc.)
 			log.Printf("📋 Non-WebSocket request from %s: %s %s (User-Agent: %s)",
-				r.RemoteAddr, r.Method, r.URL.Path, r.Header.Get("User-Agent"))
+				cfg.ClientRemoteAddr(r), r.Method, r.URL.Path, r.Header.Get("User-Agent"))
 
 			// Return a helpful response for non-WebSocket requests
 			w.Header().Set("Content-Type", "text/plain")

@@ -24,6 +24,7 @@ type Config struct {
 	ICEUDPMuxPort   int
 	ICEAdvertiseIPs []string
 	DisableSTUN     bool
+	Proxy           bool
 
 	// Capacity guardrail (primarily to match UDP port range)
 	MaxPeers int
@@ -87,6 +88,7 @@ func Load() (*Config, error) {
 	// Debug configuration
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
+	proxy, _ := strconv.ParseBool(os.Getenv("PROXY"))
 
 	// Default to debug mode if not specified
 	if os.Getenv("DEBUG") == "" {
@@ -104,6 +106,7 @@ func Load() (*Config, error) {
 		ICEUDPMuxPort:   iceUDPMuxPort,
 		ICEAdvertiseIPs: iceAdvertiseIPs,
 		DisableSTUN:     disableSTUN,
+		Proxy:           proxy,
 		MaxPeers:        maxPeers,
 	}, nil
 }
