@@ -79,13 +79,33 @@ jobs:
 
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
 
-      - name: Bump VERSION
+      - name: Determine version
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          CURRENT_VERSION="$(tr -d '[:space:]' < VERSION)"
+          # Read the current version from the tags rather than a committed file.
+          #
+          # There used to be a VERSION file, and keeping it up to date meant this
+          # step had to commit and push — to a branch that is protected, because
+          # this is a review-required path. So the release could not run at all.
+          # The file was never used for anything either: it is in .dockerignore,
+          # so it never reached the build, and the version gets into the binary
+          # through --build-arg below. It only ever duplicated the tag.
+          #
+          # fetch-depth: 0 on the checkout above is what makes the tags available.
+          CURRENT_VERSION="$(git tag --list 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
+
+          if [[ -z "$CURRENT_VERSION" ]]; then
+            echo "No v* tags found, so there is no version to bump from."
+            echo "If this repository really has no releases yet, dispatch with"
+            echo "bump=custom and an explicit version."
+            exit 1
+          fi
+
+          echo "Current version from tags: $CURRENT_VERSION"
+
           BUMP="${{ github.event.inputs.bump }}"
           CUSTOM_VERSION="${{ github.event.inputs.custom_version }}"
 
@@ -148,12 +168,10 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "$NEW_VERSION" > VERSION
-
-          git add VERSION
-          git commit -m "release: v$NEW_VERSION (${{ steps.channel.outputs.channel }})"
+          # Tag only. Nothing is committed, so nothing is pushed to main, so this
+          # works against a protected branch. The tag names the commit that was
+          # dispatched, which is what the release is built from anyway.
           git tag "v$NEW_VERSION"
-          git push origin HEAD
           git push origin "v$NEW_VERSION"
 
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
