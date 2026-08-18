@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/Gryt-chat/client/main/public/logo.svg" width="80" alt="Gryt logo" />
   <h1>Gryt SFU</h1>
-  <p>Selective Forwarding Unit for the <a href="https://github.com/Gryt-chat/gryt">Gryt</a> voice &amp; video platform.<br />High-performance Go media server built with <a href="https://github.com/pion/webrtc">Pion WebRTC</a>.<br />Forwards audio, camera, and screen-share tracks with RTCP relay and VP9 preference.</p>
+  <p>Selective Forwarding Unit for the <a href="https://github.com/Gryt-chat/gryt">Gryt</a> voice &amp; video platform.<br />High-performance Go media server built with <a href="https://github.com/pion/webrtc">Pion WebRTC</a>.<br />Forwards audio, camera and screen-share tracks, with RTCP relay and layer-aware SVC forwarding.</p>
 </div>
 
 <br />
@@ -15,7 +15,7 @@ docker run -p 5005:5005 -p 443:443/udp -p 10000-10019:10000-10019/udp --env-file
 
 Browse tags at [ghcr.io/gryt-chat/sfu](https://github.com/Gryt-chat/sfu/pkgs/container/sfu).
 
-## Quick Start (development)
+## Quick start (development)
 
 ```bash
 cp env.example .env
@@ -23,6 +23,16 @@ go run ./cmd/sfu
 ```
 
 Starts on **http://localhost:5005**.
+
+## Codecs
+
+Registered in preference order: H.264, VP9, VP8, AV1. H.264 goes first because
+it has the widest hardware-accelerated support across browsers and platforms,
+which matters more in practice than the compression the others win on.
+
+Video is forwarded per temporal layer rather than whole. `internal/svc` reads the
+dependency descriptor and drops packets above a receiver's subscribed layer, so a
+client on a poor connection gets a lower frame rate instead of a stalled track.
 
 ## Configuration
 
