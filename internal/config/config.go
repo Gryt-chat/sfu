@@ -70,9 +70,14 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// One UDP port for all media. Unset it is 3478, which is unprivileged and
-	// is the port people already open for STUN. Deployments that want media on
-	// 443, where almost nothing blocks UDP, set it themselves.
+	// One UDP port for all media. Unset it is 3478: the IANA STUN port,
+	// unprivileged, and the UDP port a locked-down network is most likely to
+	// have opened already, since Teams requires outbound 3478-3481.
+	//
+	// 443 is the tempting alternative and usually the wrong one. Firewall
+	// vendors recommend blocking UDP 443 precisely because QUIC there cannot be
+	// TLS-inspected, so on the networks you would choose it for it is the port
+	// most likely to be shut on purpose.
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
 	if iceUDPMuxPort <= 0 || iceUDPMuxPort > 65535 {
 		iceUDPMuxPort = DefaultICEUDPMuxPort
