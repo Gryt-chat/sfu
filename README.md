@@ -10,7 +10,7 @@
 
 ```bash
 docker pull ghcr.io/gryt-chat/sfu:latest
-docker run -p 5005:5005 -p 443:443/udp -p 10000-10019:10000-10019/udp --env-file .env ghcr.io/gryt-chat/sfu:latest
+docker run -p 5005:5005 -p 3478:3478/udp --env-file .env ghcr.io/gryt-chat/sfu:latest
 ```
 
 Browse tags at [ghcr.io/gryt-chat/sfu](https://github.com/Gryt-chat/sfu/pkgs/container/sfu).
