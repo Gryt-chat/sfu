@@ -106,19 +106,15 @@ func main() {
 	err = recovery.SafeExecute("MAIN", "INIT_WEBRTC_API", func() error {
 		se := pion.SettingEngine{}
 
-		// If ICE UDP mux is enabled, all ICE traffic can flow over a single UDP port.
-		// This dramatically improves success rates on networks that block "high port" UDP ranges.
-		if cfg.ICEUDPMuxPort > 0 && cfg.ICEUDPMuxPort <= 65535 {
-			udpMux, muxErr := ice.NewMultiUDPMuxFromPort(cfg.ICEUDPMuxPort)
-			if muxErr != nil {
-				return fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
-			}
-			se.SetICEUDPMux(udpMux)
-			log.Printf("🧊 ICE UDP mux enabled on port: %d", cfg.ICEUDPMuxPort)
-		} else if cfg.ICEUDPPortMin > 0 && cfg.ICEUDPPortMax >= cfg.ICEUDPPortMin && cfg.ICEUDPPortMax <= 65535 {
-			se.SetEphemeralUDPPortRange(uint16(cfg.ICEUDPPortMin), uint16(cfg.ICEUDPPortMax))
-			log.Printf("🧊 ICE UDP port range pinned: %d-%d", cfg.ICEUDPPortMin, cfg.ICEUDPPortMax)
+		// All ICE traffic flows over one UDP port. A single port is far easier
+		// to get through a firewall than a range, and networks that drop UDP on
+		// high ports let it through when it is a port they recognise.
+		udpMux, muxErr := ice.NewMultiUDPMuxFromPort(cfg.ICEUDPMuxPort)
+		if muxErr != nil {
+			return fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
 		}
+		se.SetICEUDPMux(udpMux)
+		log.Printf("🧊 ICE UDP mux on port: %d", cfg.ICEUDPMuxPort)
 		if len(cfg.ICEAdvertiseIPs) > 0 {
 			if rewriteErr := se.SetICEAddressRewriteRules(pion.ICEAddressRewriteRule{
 				External:        cfg.ICEAdvertiseIPs,

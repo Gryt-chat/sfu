@@ -38,14 +38,18 @@ client on a poor connection gets a lower frame rate instead of a stalled track.
 
 See `env.example` for all options. Key variables:
 
+Every variable the SFU reads, and nothing it does not:
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `5005` | HTTP/WebSocket port |
+| `SFU_PORT` | `5005` | HTTP/WebSocket port. `PORT` is read as a fallback |
 | `STUN_SERVERS` | `stun:stun.l.google.com:19302` | Comma-separated STUN servers |
-| `ICE_UDP_MUX_PORT` | — | Enable ICE UDP mux on a single UDP port (e.g. `443`) |
-| `ICE_UDP_PORT_MIN` | — | Min UDP port for WebRTC media |
-| `ICE_UDP_PORT_MAX` | — | Max UDP port for WebRTC media |
-| `ICE_ADVERTISE_IP` | — | Advertised IP for NAT traversal |
+| `DISABLE_STUN` | `false` | Stop discovering srflx candidates. Only safe with a direct, port-preserving path to the internet |
+| `ICE_UDP_MUX_PORT` | `3478` | The one UDP port all media flows over |
+| `ICE_ADVERTISE_IP` | — | Comma-separated IPs to advertise as host candidates, replacing the ones found on the interfaces |
+| `MAX_PEERS` | `200` | How many peers may be connected at once |
+| `DEBUG` | `true` | Room, connection and signaling logging. Defaults on when unset |
+| `VERBOSE_LOG` | `false` | RTP forwarding detail |
 
 ## Documentation
 

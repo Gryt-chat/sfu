@@ -10,6 +10,14 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+const (
+	// DefaultICEUDPMuxPort is where media goes when nothing says otherwise.
+	// 3478 needs no privileged bind and is already open on hosts that run STUN.
+	DefaultICEUDPMuxPort = 3478
+	// DefaultMaxPeers is a guardrail, not a property of the transport.
+	DefaultMaxPeers = 200
+)
+
 // Config holds the application configuration
 type Config struct {
 	Port        string
@@ -18,14 +26,14 @@ type Config struct {
 	Debug       bool
 	VerboseLog  bool
 
-	// WebRTC / ICE networking
-	ICEUDPPortMin   int
-	ICEUDPPortMax   int
+	// WebRTC / ICE networking. Every participant's media shares one UDP port,
+	// so this is the only port that has to be open for voice to work.
 	ICEUDPMuxPort   int
 	ICEAdvertiseIPs []string
 	DisableSTUN     bool
 
-	// Capacity guardrail (primarily to match UDP port range)
+	// Capacity guardrail. Nothing to do with ports any more: one muxed port
+	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
 }
 
@@ -62,9 +70,13 @@ func Load() (*Config, error) {
 		}
 	}
 
-	iceUDPPortMin, _ := strconv.Atoi(os.Getenv("ICE_UDP_PORT_MIN"))
-	iceUDPPortMax, _ := strconv.Atoi(os.Getenv("ICE_UDP_PORT_MAX"))
+	// One UDP port for all media. Unset it is 3478, which is unprivileged and
+	// is the port people already open for STUN. Deployments that want media on
+	// 443, where almost nothing blocks UDP, set it themselves.
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
+	if iceUDPMuxPort <= 0 || iceUDPMuxPort > 65535 {
+		iceUDPMuxPort = DefaultICEUDPMuxPort
+	}
 	var iceAdvertiseIPs []string
 	if raw := os.Getenv("ICE_ADVERTISE_IP"); raw != "" {
 		for _, ip := range strings.Split(raw, ",") {
@@ -74,14 +86,11 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// A muxed port accepts many peers, so this is a guardrail rather than a
+	// limit the transport imposes. What runs out first is CPU and upload.
 	maxPeers, _ := strconv.Atoi(os.Getenv("MAX_PEERS"))
-	if maxPeers <= 0 && iceUDPMuxPort > 0 {
-		// With ICE UDP mux enabled, we can accept many peers on a single UDP port.
-		// Keep it bounded by MAX_PEERS if provided; otherwise use a conservative default.
-		maxPeers = 200
-	} else if maxPeers <= 0 && iceUDPPortMin > 0 && iceUDPPortMax >= iceUDPPortMin {
-		// Default capacity to the size of the pinned UDP port range.
-		maxPeers = (iceUDPPortMax - iceUDPPortMin + 1)
+	if maxPeers <= 0 {
+		maxPeers = DefaultMaxPeers
 	}
 
 	// Debug configuration
@@ -99,8 +108,6 @@ func Load() (*Config, error) {
 		ICEServers:      iceServers,
 		Debug:           debug,
 		VerboseLog:      verboseLog,
-		ICEUDPPortMin:   iceUDPPortMin,
-		ICEUDPPortMax:   iceUDPPortMax,
 		ICEUDPMuxPort:   iceUDPMuxPort,
 		ICEAdvertiseIPs: iceAdvertiseIPs,
 		DisableSTUN:     disableSTUN,
