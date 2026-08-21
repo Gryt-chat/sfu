@@ -4,7 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,6 +118,14 @@ func main() {
 		}
 		se.SetICEUDPMux(udpMux)
 		log.Printf("🧊 ICE UDP mux on port: %d", cfg.ICEUDPMuxPort)
+		// Where, not just which port. The mux binds one socket per interface
+		// address rather than a wildcard, so an address that is missing here is
+		// an address media cannot arrive on, whatever the firewall says. That
+		// is invisible otherwise: a VPN adapter that came up after the process,
+		// or an interface that was down at startup, both look like a working
+		// SFU right up until somebody tries to reach it that way. GRYT-482.
+		muxV4, muxV6 := muxAddresses(udpMux, strconv.Itoa(cfg.ICEUDPMuxPort))
+		logBoundAddresses("🧊 ICE UDP mux bound on", muxV4, muxV6)
 		if len(cfg.ICEAdvertiseIPs) > 0 {
 			if rewriteErr := se.SetICEAddressRewriteRules(pion.ICEAddressRewriteRule{
 				External:        cfg.ICEAdvertiseIPs,
@@ -252,6 +263,11 @@ func main() {
 
 	// Start the HTTP server with recovery
 	log.Printf("🌐 Starting HTTP server on port %s", cfg.Port)
+	// A wildcard bind, unlike the UDP mux above, so this is every address the
+	// host has rather than a list of sockets that were opened one by one. The
+	// two can disagree, and when they do it is worth being able to see it.
+	hostV4, hostV6 := hostAddresses(cfg.Port)
+	logBoundAddresses("🌐 Signalling reachable on", hostV4, hostV6)
 	log.Printf("🎯 SFU Server ready!")
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -261,6 +277,132 @@ func main() {
 		logger.LogAction("MAIN", "SERVER_ERROR", "", "", err.Error())
 		log.Fatalf("❌ HTTP server failed: %v", err)
 	}
+}
+
+// logBoundAddresses says where a listener answers, in the form somebody
+// checking their router or firewall can scan.
+//
+// IPv4 in full, IPv6 as a count. A host has a handful of IPv4 addresses and
+// can easily have thirty IPv6 ones, nearly all link-local, and printing them
+// all buries the two or three anybody is looking for. The count still says
+// IPv6 is bound, which is the only thing the list was telling you.
+func logBoundAddresses(label string, v4 []string, v6Count int) {
+	if len(v4) == 0 && v6Count == 0 {
+		log.Printf("%s: nothing. No usable interface was found.", label)
+
+		return
+	}
+
+	suffix := ""
+	if v6Count > 0 {
+		suffix = fmt.Sprintf(" (and %d IPv6)", v6Count)
+	}
+
+	if len(v4) == 0 {
+		log.Printf("%s: no IPv4%s", label, suffix)
+
+		return
+	}
+
+	log.Printf("%s: %s%s", label, strings.Join(v4, ", "), suffix)
+}
+
+// interfaceNames maps an IP to the interface it sits on, so an address can say
+// which adapter it came from. Best effort: an address with no match is printed
+// without one rather than held back.
+func interfaceNames() map[string]string {
+	names := map[string]string{}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return names
+	}
+
+	for _, iface := range ifaces {
+		addrs, addrErr := iface.Addrs()
+		if addrErr != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				names[ipNet.IP.String()] = iface.Name
+			}
+		}
+	}
+
+	return names
+}
+
+// muxAddresses asks the mux what it actually bound, rather than repeating the
+// interface enumeration and hoping the two agree.
+func muxAddresses(mux ice.UDPMux, port string) ([]string, int) {
+	names := interfaceNames()
+
+	v4 := []string{}
+	v6 := 0
+
+	for _, addr := range mux.GetListenAddresses() {
+		udpAddr, ok := addr.(*net.UDPAddr)
+		if !ok || udpAddr.IP.To4() == nil {
+			v6++
+
+			continue
+		}
+		v4 = append(v4, describe(udpAddr.IP, port, names))
+	}
+	sort.Strings(v4)
+
+	return v4, v6
+}
+
+// hostAddresses lists the addresses a wildcard listener on this port answers
+// on. Loopback is included deliberately: "127.0.0.1 and nothing else" is a
+// real and diagnosable state, and hiding it would hide the diagnosis.
+func hostAddresses(port string) ([]string, int) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		log.Printf("⚠️  Could not enumerate interfaces: %v", err)
+
+		return nil, 0
+	}
+
+	v4 := []string{}
+	v6 := 0
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, addrErr := iface.Addrs()
+		if addrErr != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ipNet.IP.To4() == nil {
+				v6++
+
+				continue
+			}
+			v4 = append(v4, fmt.Sprintf("%s:%s (%s)", ipNet.IP, port, iface.Name))
+		}
+	}
+	sort.Strings(v4)
+
+	return v4, v6
+}
+
+// describe renders one address as ip:port (iface), dropping the interface when
+// it is not known.
+func describe(ip net.IP, port string, names map[string]string) string {
+	if name, ok := names[ip.String()]; ok {
+		return fmt.Sprintf("%s:%s (%s)", ip, port, name)
+	}
+
+	return fmt.Sprintf("%s:%s", ip, port)
 }
 
 // registerCodecs registers audio and video codecs with H264 listed first so
