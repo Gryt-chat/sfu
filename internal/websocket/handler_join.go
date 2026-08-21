@@ -63,8 +63,9 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 		h.debugLog("✅ Client %s validated for room '%s'", clientID, joinData.RoomID)
 
-		// Capacity guardrail: prevent accepting more peers than the SFU can reliably bind
-		// (primarily tied to the configured ICE UDP port range).
+		// Capacity guardrail on what this machine should carry, not on ports:
+		// one muxed UDP port takes far more peers than a host has CPU and
+		// upload bandwidth for. Unset, MaxPeers is config.DefaultMaxPeers.
 		if h.config.MaxPeers > 0 {
 			currentPeers := h.roomManager.TotalPeers()
 			if currentPeers >= h.config.MaxPeers {
