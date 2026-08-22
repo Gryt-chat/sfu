@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -301,24 +302,24 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 				case types.EventCandidate:
 					return h.handleICECandidate(peerConnection, message.Data, clientID)
 				case types.EventAnswer:
-					if answerErr := h.handleAnswer(peerConnection, message.Data, clientID, roomID); answerErr != nil {
+					if answerErr := h.handleAnswer(peerConnection, message.Data, clientID); answerErr != nil {
 						return answerErr
 					}
+					// The peer is stable again, so anything it asked for while
+					// it was not gets its turn now — before the room re-signal
+					// below, which is what used to take the peer back out of
+					// stable underneath the deferred renegotiation.
 					if pendingRenegotiate {
-						pendingRenegotiate = false
 						h.debugLog("🔄 Executing deferred renegotiation for %s", clientID)
-						if reErr := h.handleRenegotiate(peerConnection, conn, clientID, roomID); reErr != nil {
-							h.debugLog("❌ Deferred renegotiation failed for %s: %v", clientID, reErr)
-						}
+						pendingRenegotiate = h.renegotiateOrDefer(peerConnection, conn, clientID, roomID)
 					}
+					// Distribute any tracks that arrived while this peer was in
+					// have-local-offer.
+					go h.coordinator.SignalPeerConnectionsInRoom(roomID)
 					return nil
 				case types.EventRenegotiate:
-					if peerConnection.SignalingState() != webrtc.SignalingStateStable {
-						h.debugLog("⏳ Deferring renegotiate for %s: signaling state=%s", clientID, peerConnection.SignalingState().String())
-						pendingRenegotiate = true
-						return nil
-					}
-					return h.handleRenegotiate(peerConnection, conn, clientID, roomID)
+					pendingRenegotiate = h.renegotiateOrDefer(peerConnection, conn, clientID, roomID)
+					return nil
 				case types.EventSetLayer:
 					return h.handleSetLayer(message.Data, clientID, roomID)
 				case types.EventKeepAlive:
@@ -358,9 +359,10 @@ func (h *Handler) handleICECandidate(peerConnection *webrtc.PeerConnection, data
 	return nil
 }
 
-// handleAnswer processes answer messages and triggers re-signaling to
-// distribute any tracks that arrived while this peer was in have-local-offer.
-func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clientID, roomID string) error {
+// handleAnswer applies an answer, leaving the peer's signaling state stable.
+// The caller re-signals the room afterwards, once anything the peer is owed
+// has had its turn.
+func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clientID string) error {
 	answer := webrtc.SessionDescription{}
 	if err := recovery.SafeJSONUnmarshal([]byte(data), &answer); err != nil {
 		h.debugLog("❌ Error unmarshalling answer from %s: %v", clientID, err)
@@ -373,20 +375,44 @@ func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clie
 		return err
 	}
 
-	// Signaling state is now stable again. Re-signal the room so that any
-	// tracks that arrived while this peer was in have-local-offer get added
-	// and offered. This is safe because processPeerConnection only creates
-	// an offer when there are actual track changes (no infinite loop).
-	go h.coordinator.SignalPeerConnectionsInRoom(roomID)
 	return nil
 }
 
+// renegotiateOrDefer renegotiates now if the peer can, and otherwise says the
+// peer is still owed one. The return value is the caller's pending flag: the
+// request is only considered served once an offer has actually gone out.
+//
+// A client that has just added a camera or screen track cannot publish it until
+// the SFU offers again, and it only asks once. Dropping the request — because
+// the peer was mid-negotiation, or because CreateOffer lost a race with the
+// room signaler — left the SFU never learning about that track, so the track
+// existed in the publisher's local preview and nowhere else. Nothing retried,
+// nothing errored, and every other participant sat on "Connecting video…"
+// indefinitely (GRYT-32).
+//
+// Deferring is safe to leave to the next answer: the peer is only ever
+// non-stable because the SFU has an offer outstanding to it, so an answer is
+// already on its way.
+func (h *Handler) renegotiateOrDefer(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) (stillPending bool) {
+	if peerConnection.SignalingState() != webrtc.SignalingStateStable {
+		h.debugLog("⏳ Deferring renegotiate for %s: signaling state=%s (retried after next answer)", clientID, peerConnection.SignalingState().String())
+		return true
+	}
+
+	if err := h.handleRenegotiate(peerConnection, conn, clientID, roomID); err != nil {
+		h.debugLog("❌ Renegotiation for %s failed, keeping it pending: %v", clientID, err)
+		return true
+	}
+
+	return false
+}
+
 // handleRenegotiate creates a fresh offer so the client can include newly
-// added tracks (camera, screen share) in its answer.
+// added tracks (camera, screen share) in its answer. Callers go through
+// renegotiateOrDefer so that a refused or failed attempt is not forgotten.
 func (h *Handler) handleRenegotiate(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) error {
 	if peerConnection.SignalingState() != webrtc.SignalingStateStable {
-		h.debugLog("⏳ Cannot renegotiate for %s right now: signaling state=%s (will be retried after next answer)", clientID, peerConnection.SignalingState().String())
-		return nil
+		return fmt.Errorf("peer %s not stable (%s)", clientID, peerConnection.SignalingState().String())
 	}
 
 	h.debugLog("🔄 Renegotiation requested by client %s in room '%s'", clientID, roomID)
