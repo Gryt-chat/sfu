@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Same source of truth as release.yml, so a Go bump in go.mod moves
+          # both at once.
+          go-version-file: go.mod
+          cache: true
+      # The only compile check this repo had was `go build -o /dev/null
+      # ./cmd/sfu` inside release.yml, and that workflow is workflow_dispatch
+      # only — so nothing checked a pull request at all. ./... rather than
+      # ./cmd/sfu, because a package no binary imports still has to compile.
+      - run: go build ./...
+      - run: go vet ./...
+      # These tests existed and had never run anywhere but a developer's
+      # machine. -race because every bug this package has had is a race:
+      # GRYT-32 was a renegotiation request dropped by a goroutine and the
+      # message loop touching the same peer connection.
+      - run: go test -race ./...
+      # gofmt is deliberately not checked. Four files on main do not satisfy it
+      # — internal/signaling/coordinator.go, internal/svc/forwarder.go,
+      # internal/webrtc/peer.go, internal/websocket/handler.go — mostly
+      # indentation inside a closure. Adding the gate means a formatting sweep
+      # across review-required paths for no behavioural reason, which is its own
+      # PR and its own decision. See GRYT-523.
