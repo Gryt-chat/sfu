@@ -112,7 +112,10 @@ func main() {
 		// All ICE traffic flows over one UDP port. A single port is far easier
 		// to get through a firewall than a range, and networks that drop UDP on
 		// high ports let it through when it is a port they recognise.
-		udpMux, muxErr := ice.NewMultiUDPMuxFromPort(cfg.ICEUDPMuxPort)
+		udpMux, muxErr := ice.NewMultiUDPMuxFromPort(
+			cfg.ICEUDPMuxPort,
+			ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress),
+		)
 		if muxErr != nil {
 			return fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
 		}
@@ -403,6 +406,10 @@ func describe(ip net.IP, port string, names map[string]string) string {
 	}
 
 	return fmt.Sprintf("%s:%s", ip, port)
+}
+
+func shouldBindICEUDPAddress(ip net.IP) bool {
+	return !ip.IsLinkLocalUnicast()
 }
 
 // registerCodecs registers audio and video codecs with H264 listed first so
