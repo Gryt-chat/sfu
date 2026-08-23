@@ -3,6 +3,7 @@ package websocket
 import (
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/pion/webrtc/v4"
 
@@ -155,8 +156,31 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 	})
 }
 
-// setupWebRTCHandlers sets up WebRTC event handlers with crash protection
+// setupWebRTCHandlers sets up WebRTC event handlers with crash protection.
+//
+// One OnConnectionStateChange registration, and that is load-bearing rather
+// than tidiness. pion's OnConnectionStateChange is handler.Store(f) — it
+// replaces the handler instead of adding one — so a second registration
+// anywhere silently turns the first one off.
+//
+// This file used to register it twice: here, for the state machine, and again
+// per track inside OnTrack, through a waitForPCClose helper. With one track
+// that only disabled the state machine. With two — audio and a camera, which is
+// the ordinary case now that phones can send video — the second track's
+// registration replaced the first track's, so the first track's cleanup was
+// waiting on a channel nothing would ever close. Its deferred
+// RemoveTrackFromRoom never ran, the track stayed in the room's map, and every
+// client that joined afterwards was forwarded a stream whose sender had left.
+// That is what "Someone" tiles for people who are gone actually were. GRYT-570.
 func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) {
+	// Closed once, when the peer connection reaches a state it cannot come back
+	// from. Every track's cleanup waits on this, so they all fire rather than
+	// only the one that happened to register last.
+	closed := make(chan struct{})
+	var closeOnce sync.Once
+	markClosed := func() {
+		closeOnce.Do(func() { close(closed) })
+	}
 	// Set up ICE candidate handling with recovery
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		recovery.SafeExecuteWithContext("WEBRTC", "ICE_CANDIDATE", clientID, roomID, "Handling ICE candidate", func() error {
@@ -196,11 +220,13 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			switch p {
 			case webrtc.PeerConnectionStateFailed:
 				h.debugLog("❌ Peer connection failed for %s", clientID)
+				markClosed()
 				if err := peerConnection.Close(); err != nil {
 					h.debugLog("❌ Peer connection failed to close for %s: %v", clientID, err)
 				}
 			case webrtc.PeerConnectionStateClosed:
 				h.debugLog("🔌 Peer connection closed for %s", clientID)
+				markClosed()
 				h.coordinator.SignalPeerConnectionsInRoom(roomID)
 			case webrtc.PeerConnectionStateConnected:
 				h.debugLog("✅ Peer connection established for %s in room '%s'", clientID, roomID)
@@ -208,6 +234,13 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			return nil
 		})
 	})
+
+	// Already gone by the time the handler was attached, which pion will not
+	// call back about. Rare, and the cost of missing it is a track that is
+	// never cleaned up — the exact bug this function is fixing.
+	if st := peerConnection.ConnectionState(); st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateFailed {
+		markClosed()
+	}
 
 	// Handle incoming tracks with recovery.
 	// The LayerForwarder (created inside AddTrackToRoom) handles all RTP
@@ -241,32 +274,11 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			// goroutine reads from the remote track; when the PC closes
 			// the track read will error out and the forwarder stops. We
 			// wait here so the deferred cleanup runs at the correct time.
-			<-waitForPCClose(peerConnection)
+			//
+			// On the shared channel rather than a registration of its own —
+			// see the note on this function.
+			<-closed
 			return nil
 		})
 	})
-}
-
-// waitForPCClose returns a channel that closes when the peer connection
-// reaches the Closed or Failed state.
-func waitForPCClose(pc *webrtc.PeerConnection) <-chan struct{} {
-	ch := make(chan struct{})
-	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateFailed {
-			select {
-			case <-ch:
-			default:
-				close(ch)
-			}
-		}
-	})
-	// If already closed, signal immediately.
-	if st := pc.ConnectionState(); st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateFailed {
-		select {
-		case <-ch:
-		default:
-			close(ch)
-		}
-	}
-	return ch
 }
