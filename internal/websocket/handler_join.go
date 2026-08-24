@@ -73,7 +73,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 				msg := fmt.Sprintf("Sorry, there are no seats left in this voice server (%d/%d). Try again later.", currentPeers, h.config.MaxPeers)
 				h.debugLog("🚫 Rejecting client %s: capacity reached (%d/%d)", clientID, currentPeers, h.config.MaxPeers)
 				h.sendErrorToConnection(conn, msg)
-				return fmt.Errorf("server full: %d/%d", currentPeers, h.config.MaxPeers)
+				return fmt.Errorf("%w: %d/%d", ErrServerFull, currentPeers, h.config.MaxPeers)
 			}
 		}
 

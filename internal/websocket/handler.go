@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,6 +24,32 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// ErrServerFull is the capacity guardrail in handler_join.go, given a name so
+// the close frame can be 1013 "try again later" rather than a flat 1011. A
+// client that is turned away because the box is full should be able to tell
+// that apart from one that hit a bug.
+var ErrServerFull = errors.New("server full")
+
+// closeStatusFor picks the close code and reason for a connection that is
+// ending, from whatever the handler returned.
+//
+// The reason strings are fixed rather than the error text. They travel to
+// whoever is connected, error strings here carry token and validation detail,
+// and the code is what answers the question worth answering: was this the SFU
+// or was this the network? 1006 — which is what a bare Close() produces, and
+// what this exists to stop — means neither end said anything, so nothing here
+// ever returns it.
+func closeStatusFor(err error) (code int, reason string) {
+	switch {
+	case err == nil:
+		return websocket.CloseNormalClosure, ""
+	case errors.Is(err, ErrServerFull):
+		return websocket.CloseTryAgainLater, "server full"
+	default:
+		return websocket.CloseInternalServerErr, "sfu error"
+	}
 }
 
 // Coordinator interface to avoid circular imports
@@ -81,10 +108,17 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		metrics.WebSocketConnections.Inc()
 		safeConn := NewThreadSafeWriter(unsafeConn)
+
+		// Why this connection ended, so the close frame below can say. Set by
+		// the handler that owns the connection, read by the deferred close
+		// after that handler has returned.
+		var handlerErr error
+
 		defer func() {
 			metrics.WebSocketConnections.Dec()
 			recovery.SafeExecute("WEBSOCKET", "CLOSE_CONNECTION", func() error {
-				safeConn.Close()
+				code, reason := closeStatusFor(handlerErr)
+				safeConn.CloseWithReason(code, reason)
 				return nil
 			})
 		}()
@@ -97,14 +131,16 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch parsedURL.Path {
 		case "/server":
 			h.debugLog("🖥️  Handling server connection: %s", clientID)
-			return h.handleServerConnection(safeConn, clientID)
+			handlerErr = h.handleServerConnection(safeConn, clientID)
 		case "/client":
 			h.debugLog("👤 Handling client connection: %s", clientID)
-			return h.handleClientConnection(safeConn, clientID, r)
+			handlerErr = h.handleClientConnection(safeConn, clientID, r)
 		default:
 			h.debugLog("👤 Handling default client connection: %s", clientID)
-			return h.handleClientConnection(safeConn, clientID, r)
+			handlerErr = h.handleClientConnection(safeConn, clientID, r)
 		}
+
+		return handlerErr
 	})
 }
 
