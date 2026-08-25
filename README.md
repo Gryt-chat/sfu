@@ -48,6 +48,8 @@ Every variable the SFU reads, and nothing it does not:
 | `ICE_UDP_MUX_PORT` | `3478` | The one UDP port all media flows over |
 | `ICE_ADVERTISE_IP` | — | Comma-separated IPs to advertise as host candidates, replacing the ones found on the interfaces |
 | `MAX_PEERS` | `200` | How many peers may be connected at once |
+| `SFU_PING_INTERVAL` | `30` | Seconds between WebSocket pings. `0` switches pinging and the read deadline off |
+| `SFU_PONG_TIMEOUT` | `90` | Seconds a peer may say nothing before the SFU hangs up. Raised to two ping intervals if set lower |
 | `DEBUG` | `true` | Room, connection and signaling logging. Defaults on when unset |
 | `VERBOSE_LOG` | `false` | RTP forwarding detail |
 

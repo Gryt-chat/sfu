@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -32,6 +34,45 @@ var upgrader = websocket.Upgrader{
 // that apart from one that hit a bug.
 var ErrServerFull = errors.New("server full")
 
+// ErrPeerUnresponsive is the read deadline in keepalive.go firing: the peer
+// stopped answering pings, so the SFU stopped waiting for it. Given a name for
+// the same reason ErrServerFull has one — "we gave up on you" and "we hit a
+// bug" are different things and should not arrive as the same close code.
+var ErrPeerUnresponsive = errors.New("peer unresponsive")
+
+// closeCodePingTimeout says the SFU hung up because nothing came back.
+//
+// A private-use code (4000-4999 is reserved for exactly this) rather than one
+// of the 1000-series, because none of those means "you stopped answering".
+// 1011 is a bug on our side, 1013 already means the box is full, and 1001 is
+// the server going away. Reusing any of them would put this case in the same
+// line of the log as something it is not, which is the whole failure the close
+// frames were added to fix.
+//
+// Most of the time this frame is written to a peer that is not there to read
+// it, so its real audience is the SFU's own log. When the peer is merely slow
+// rather than gone it does arrive, and the client treats anything that is not
+// a clean 1000 or 1001 as cause to reconnect — which is the right answer here.
+const closeCodePingTimeout = 4000
+
+// isReadDeadline reports whether a read ended because the deadline armed in
+// keepalive.go expired, rather than because the connection broke or the peer
+// closed it.
+func isReadDeadline(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+
+	// Belt and braces for anything that reports a timeout without wrapping the
+	// sentinel. Cheap, and the alternative is this case quietly reporting
+	// itself as "sfu error".
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
 // closeStatusFor picks the close code and reason for a connection that is
 // ending, from whatever the handler returned.
 //
@@ -47,6 +88,8 @@ func closeStatusFor(err error) (code int, reason string) {
 		return websocket.CloseNormalClosure, ""
 	case errors.Is(err, ErrServerFull):
 		return websocket.CloseTryAgainLater, "server full"
+	case errors.Is(err, ErrPeerUnresponsive):
+		return closeCodePingTimeout, "ping timeout"
 	default:
 		return websocket.CloseInternalServerErr, "sfu error"
 	}
@@ -109,6 +152,13 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		metrics.WebSocketConnections.Inc()
 		safeConn := NewThreadSafeWriter(unsafeConn)
 
+		// Started here rather than inside either handler, so it covers the
+		// join handshake too. A socket that connects and then never sends
+		// client_join reaches no room and no peer, and before this it sat in
+		// a blocking read with nothing to end it.
+		keepAlive := StartKeepAlive(safeConn, h.config.PingInterval, h.config.PongTimeout)
+		defer keepAlive.Stop()
+
 		// Why this connection ended, so the close frame below can say. Set by
 		// the handler that owns the connection, read by the deferred close
 		// after that handler has returned.
@@ -138,6 +188,16 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		default:
 			h.debugLog("👤 Handling default client connection: %s", clientID)
 			handlerErr = h.handleClientConnection(safeConn, clientID, r)
+		}
+
+		// Translated in one place rather than in each of the three read loops.
+		// A read that ended on the deadline is a timeout error from the
+		// underlying socket, and every one of those would otherwise reach
+		// closeStatusFor as "anything else" and be reported as an SFU bug.
+		if isReadDeadline(handlerErr) {
+			metrics.PingTimeouts.Inc()
+			h.debugLog("💀 No word from %s in %s — hanging up", clientID, h.config.PongTimeout)
+			handlerErr = fmt.Errorf("%w after %s", ErrPeerUnresponsive, h.config.PongTimeout)
 		}
 
 		return handlerErr
