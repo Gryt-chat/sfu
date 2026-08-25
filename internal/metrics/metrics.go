@@ -25,4 +25,13 @@ var (
 		Name: "gryt_sfu_tracks_active",
 		Help: "Number of active media tracks being forwarded",
 	})
+
+	// The number worth watching after the ping went in. A handful a day is
+	// peers whose network died, which is the case this is for. A step change
+	// after a deploy means the deadline is too tight for somebody's network,
+	// and SFU_PING_INTERVAL=0 turns it off without a release.
+	PingTimeouts = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "gryt_sfu_websocket_ping_timeouts_total",
+		Help: "WebSocket connections closed because the peer stopped answering pings",
+	})
 )

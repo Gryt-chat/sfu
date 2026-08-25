@@ -22,6 +22,52 @@ const maxCloseReason = 123
 type ThreadSafeWriter struct {
 	*websocket.Conn
 	sync.Mutex
+
+	// How long the peer may say nothing before its read deadline fires. Zero
+	// means no deadline, which is what it is until StartKeepAlive sets it, and
+	// what it stays if liveness checking is switched off.
+	//
+	// Not guarded by the mutex above, and it does not need to be: it is
+	// written once, before the connection's read loop starts, and everything
+	// that reads it afterwards runs on that same reading goroutine.
+	readTimeout time.Duration
+}
+
+// ReadMessage shadows the embedded gorilla method so every message that
+// arrives pushes the read deadline back out.
+//
+// A shadow rather than a helper with its own name, because three separate read
+// loops already call conn.ReadMessage() — the client loop, the server loop,
+// and the join handshake that runs before a connection is anything more than
+// an open socket. Threading a new name through all three leaves one of them to
+// be missed, and the one that got missed would be the one holding a goroutine
+// open with no deadline on it.
+//
+// Extending on any message and not only on pong is the more forgiving of the
+// two rules. A peer that is sending is alive whether or not its WebSocket
+// stack answers control frames, and the cost of being wrong in this direction
+// is hanging up on somebody who was fine.
+func (t *ThreadSafeWriter) ReadMessage() (int, []byte, error) {
+	messageType, payload, err := t.Conn.ReadMessage()
+	if err == nil {
+		t.extendReadDeadline()
+	}
+	return messageType, payload, err
+}
+
+// armReadDeadline sets the timeout and starts the clock.
+func (t *ThreadSafeWriter) armReadDeadline(timeout time.Duration) {
+	t.readTimeout = timeout
+	t.extendReadDeadline()
+}
+
+// extendReadDeadline gives the peer another full timeout to say something.
+func (t *ThreadSafeWriter) extendReadDeadline() {
+	if t.readTimeout <= 0 {
+		return
+	}
+
+	_ = t.Conn.SetReadDeadline(time.Now().Add(t.readTimeout))
 }
 
 // WriteJSON writes a JSON message to the WebSocket connection in a thread-safe manner

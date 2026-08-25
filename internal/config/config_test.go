@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // The mux port is the only UDP port now, so an unset one has to land somewhere
 // rather than leaving pion to pick ephemeral ports nobody opened.
@@ -67,5 +70,101 @@ func TestMaxPeersIsTakenFromTheEnvironment(t *testing.T) {
 	}
 	if cfg.MaxPeers != 12 {
 		t.Fatalf("max peers = %d, want 12", cfg.MaxPeers)
+	}
+}
+
+// The liveness settings decide who gets hung up on, so the two ways of getting
+// them wrong both have to be safe: a value nobody set, and a value somebody set
+// too tight.
+
+func TestPingDefaultsWhenUnset(t *testing.T) {
+	t.Setenv("SFU_PING_INTERVAL", "")
+	t.Setenv("SFU_PONG_TIMEOUT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PingInterval != DefaultPingInterval {
+		t.Errorf("ping interval = %s, want %s", cfg.PingInterval, DefaultPingInterval)
+	}
+	if cfg.PongTimeout != DefaultPongTimeout {
+		t.Errorf("pong timeout = %s, want %s", cfg.PongTimeout, DefaultPongTimeout)
+	}
+}
+
+func TestPingIsTakenFromTheEnvironment(t *testing.T) {
+	t.Setenv("SFU_PING_INTERVAL", "10")
+	t.Setenv("SFU_PONG_TIMEOUT", "45")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PingInterval != 10*time.Second {
+		t.Errorf("ping interval = %s, want 10s", cfg.PingInterval)
+	}
+	if cfg.PongTimeout != 45*time.Second {
+		t.Errorf("pong timeout = %s, want 45s", cfg.PongTimeout)
+	}
+}
+
+// Zero is a value here rather than a missing one: it is how the whole mechanism
+// is switched off without a release, which is the escape hatch if it ever turns
+// out to be hanging up on people who were fine.
+func TestZeroPingIntervalIsKept(t *testing.T) {
+	t.Setenv("SFU_PING_INTERVAL", "0")
+	t.Setenv("SFU_PONG_TIMEOUT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PingInterval != 0 {
+		t.Fatalf("ping interval = %s, want it left at 0", cfg.PingInterval)
+	}
+}
+
+// A timeout under two intervals hangs up on a peer that lost a single pong,
+// which is everybody, eventually.
+func TestATooTightTimeoutIsRaised(t *testing.T) {
+	t.Setenv("SFU_PING_INTERVAL", "30")
+	t.Setenv("SFU_PONG_TIMEOUT", "20")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PongTimeout != 60*time.Second {
+		t.Fatalf("pong timeout = %s, want it raised to 60s", cfg.PongTimeout)
+	}
+}
+
+// Nothing to raise when there are no pings to miss.
+func TestTimeoutIsLeftAloneWhenPingingIsOff(t *testing.T) {
+	t.Setenv("SFU_PING_INTERVAL", "0")
+	t.Setenv("SFU_PONG_TIMEOUT", "5")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PongTimeout != 5*time.Second {
+		t.Fatalf("pong timeout = %s, want 5s", cfg.PongTimeout)
+	}
+}
+
+func TestUnreadablePingValuesFallBack(t *testing.T) {
+	for _, value := range []string{"-1", "thirty", "30s"} {
+		t.Setenv("SFU_PING_INTERVAL", value)
+		t.Setenv("SFU_PONG_TIMEOUT", "")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.PingInterval != DefaultPingInterval {
+			t.Errorf("%q gave ping interval %s, want %s", value, cfg.PingInterval, DefaultPingInterval)
+		}
 	}
 }

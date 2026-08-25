@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/pion/webrtc/v4"
@@ -16,6 +17,18 @@ const (
 	DefaultICEUDPMuxPort = 3478
 	// DefaultMaxPeers is a guardrail, not a property of the transport.
 	DefaultMaxPeers = 200
+
+	// DefaultPingInterval is how often the SFU pokes a quiet connection to
+	// check somebody is still on the other end. It doubles as the only traffic
+	// that travels server to client during a call, which is what keeps a NAT
+	// or firewall mapping from being reaped as idle.
+	DefaultPingInterval = 30 * time.Second
+
+	// DefaultPongTimeout is how long a peer may say nothing at all before the
+	// SFU gives up on it. Three ping intervals, so two pings have to go
+	// unanswered in a row before anybody is hung up on — a single lost pong,
+	// or one arriving late behind a stalled read, is not enough.
+	DefaultPongTimeout = 90 * time.Second
 )
 
 // Config holds the application configuration
@@ -35,6 +48,12 @@ type Config struct {
 	// Capacity guardrail. Nothing to do with ports any more: one muxed port
 	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
+
+	// Liveness. The SFU pings each WebSocket every PingInterval and gives up on
+	// one that has said nothing for PongTimeout. internal/websocket/keepalive.go
+	// has the reasoning; a PingInterval of zero turns both off.
+	PingInterval time.Duration
+	PongTimeout  time.Duration
 }
 
 // Load reads configuration from environment variables
@@ -98,6 +117,23 @@ func Load() (*Config, error) {
 		maxPeers = DefaultMaxPeers
 	}
 
+	// Both in whole seconds. SFU_PING_INTERVAL=0 switches liveness checking off
+	// entirely, read deadline included — the escape hatch if this ever starts
+	// hanging up on people who were fine.
+	pingInterval := durationSecondsFromEnv("SFU_PING_INTERVAL", DefaultPingInterval)
+	pongTimeout := durationSecondsFromEnv("SFU_PONG_TIMEOUT", DefaultPongTimeout)
+
+	// A timeout shorter than two ping intervals disconnects healthy peers: the
+	// deadline fires before a second ping has even gone out, so one lost pong
+	// is fatal. Raise it rather than refusing to start — an SFU that will not
+	// boot because somebody typed a small number is worse than one that says
+	// what it did instead.
+	if pingInterval > 0 && pongTimeout < 2*pingInterval {
+		log.Printf("Warning: SFU_PONG_TIMEOUT (%s) is under two ping intervals (%s); using %s, the least that survives a single lost pong",
+			pongTimeout, pingInterval, 2*pingInterval)
+		pongTimeout = 2 * pingInterval
+	}
+
 	// Debug configuration
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
@@ -117,5 +153,28 @@ func Load() (*Config, error) {
 		ICEAdvertiseIPs: iceAdvertiseIPs,
 		DisableSTUN:     disableSTUN,
 		MaxPeers:        maxPeers,
+		PingInterval:    pingInterval,
+		PongTimeout:     pongTimeout,
 	}, nil
+}
+
+// durationSecondsFromEnv reads a whole number of seconds, and keeps the default
+// when the variable is unset or unreadable.
+//
+// Zero is a value, not an absence — it is how liveness checking is turned off —
+// so an unset variable and an explicit 0 have to be told apart, which is why
+// this does not go through strconv.Atoi's zero-on-error.
+func durationSecondsFromEnv(name string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+
+	seconds, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || seconds < 0 {
+		log.Printf("Warning: ignoring %s=%q — want a whole number of seconds; using %s", name, raw, fallback)
+		return fallback
+	}
+
+	return time.Duration(seconds) * time.Second
 }
