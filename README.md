@@ -38,7 +38,7 @@ client on a poor connection gets a lower frame rate instead of a stalled track.
 
 See `env.example` for all options. Key variables:
 
-Every variable the SFU reads, and nothing it does not:
+Every variable the SFU reads, and nothing it doesn't:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
