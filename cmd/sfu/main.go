@@ -204,6 +204,29 @@ func main() {
 		}
 	})
 
+	// Ending calls somebody is sitting in alone. Its own routine rather than a
+	// second job inside the cleanup above, because that one runs every five
+	// minutes against a thirty-minute threshold and this one has to notice
+	// inside a couple of minutes.
+	if cfg.CallAloneTimeout > 0 {
+		recovery.SafeGoroutine("MAIN", "CALL_SWEEP", func() {
+			ticker := time.NewTicker(config.DefaultCallSweepInterval)
+			defer ticker.Stop()
+
+			log.Printf("📴 Abandoned-call sweep started (check interval: %s, ends a call after %s alone)",
+				config.DefaultCallSweepInterval, cfg.CallAloneTimeout)
+
+			for range ticker.C {
+				recovery.SafeExecute("CALL_SWEEP", "SWEEP_CYCLE", func() error {
+					roomManager.EndAbandonedCalls(cfg.CallAloneTimeout)
+					return nil
+				})
+			}
+		})
+	} else {
+		log.Printf("📴 Abandoned-call sweep off (SFU_CALL_ALONE_TIMEOUT=0)")
+	}
+
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")

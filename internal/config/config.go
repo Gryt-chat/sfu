@@ -29,6 +29,20 @@ const (
 	// unanswered in a row before anybody is hung up on — a single lost pong,
 	// or one arriving late behind a stalled read, is not enough.
 	DefaultPongTimeout = 90 * time.Second
+
+	// DefaultCallAloneTimeout is how long one person may be the only one in a
+	// call before the SFU ends it. Long enough that stepping away to let
+	// somebody back in is not punished, short enough to be worth doing.
+	//
+	// Calls only. A voice channel is a place and sitting in one alone is
+	// ordinary; internal/room/calls.go is where the two are told apart.
+	DefaultCallAloneTimeout = 2 * time.Minute
+
+	// DefaultCallSweepInterval is how often that is checked. It bounds the
+	// error on the timeout above — a call ends between the timeout and one
+	// interval after it — and it is the whole cost of the feature when nobody
+	// is in a call at all, which is a map iteration.
+	DefaultCallSweepInterval = 15 * time.Second
 )
 
 // Config holds the application configuration
@@ -54,6 +68,10 @@ type Config struct {
 	// has the reasoning; a PingInterval of zero turns both off.
 	PingInterval time.Duration
 	PongTimeout  time.Duration
+
+	// How long somebody may be alone in a call before it ends. Zero turns it
+	// off and leaves the room up until the peer goes on its own.
+	CallAloneTimeout time.Duration
 }
 
 // Load reads configuration from environment variables
@@ -123,6 +141,10 @@ func Load() (*Config, error) {
 	pingInterval := durationSecondsFromEnv("SFU_PING_INTERVAL", DefaultPingInterval)
 	pongTimeout := durationSecondsFromEnv("SFU_PONG_TIMEOUT", DefaultPongTimeout)
 
+	// Also whole seconds, and zero is off — a server owner who would rather a
+	// call stayed up until somebody closed it says so without a rebuild.
+	callAloneTimeout := durationSecondsFromEnv("SFU_CALL_ALONE_TIMEOUT", DefaultCallAloneTimeout)
+
 	// A timeout shorter than two ping intervals disconnects healthy peers: the
 	// deadline fires before a second ping has even gone out, so one lost pong
 	// is fatal. Raise it rather than refusing to start — an SFU that will not
@@ -155,6 +177,8 @@ func Load() (*Config, error) {
 		MaxPeers:        maxPeers,
 		PingInterval:    pingInterval,
 		PongTimeout:     pongTimeout,
+
+		CallAloneTimeout: callAloneTimeout,
 	}, nil
 }
 
