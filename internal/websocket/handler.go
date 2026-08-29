@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -365,6 +366,15 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 		messageCount := 0
 		pendingRenegotiate := false
 
+		// When this connection last said it was still here. Per-connection, so
+		// it costs a comparison rather than another entry in a map under the
+		// room manager's lock — which is the thing being protected. still_here
+		// is the one client message that takes that lock, and a client sending
+		// it in a loop would serialise it against every room operation in the
+		// process. Nothing is gained by sending it faster than this: the clock
+		// it restarts is two minutes long.
+		var lastStillHere time.Time
+
 		for {
 			var raw []byte
 			var err error
@@ -418,6 +428,17 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 					return nil
 				case types.EventSetLayer:
 					return h.handleSetLayer(message.Data, clientID, roomID)
+				case types.EventStillHere:
+					now := time.Now()
+					if now.Sub(lastStillHere) < stillHereMinInterval {
+						h.debugLog("🙋 Ignoring still_here from %s: %s since the last one", clientID, now.Sub(lastStillHere).Round(time.Millisecond))
+						return nil
+					}
+					lastStillHere = now
+					if h.roomManager.StillHere(roomID) {
+						h.debugLog("🙋 %s says they are still in call '%s'", clientID, roomID)
+					}
+					return nil
 				case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from %s", clientID)
@@ -564,6 +585,40 @@ func (h *Handler) sendErrorToConnection(conn *ThreadSafeWriter, errorMsg string)
 		return conn.WriteJSON(&types.WebSocketMessage{
 			Event: types.EventRoomError,
 			Data:  errorMsg,
+		})
+	})
+}
+
+// stillHereMinInterval is how often one connection may say it is still here.
+//
+// A second is far below anything a person can press and far above what a loop
+// costs to ignore.
+const stillHereMinInterval = time.Second
+
+// sendRoomJoined tells a client it is in, and what this SFU's call timeout is.
+//
+// Separate from sendSuccessToConnection, which sends the same event to the
+// *server* connection after it registers. That one is read by nothing and is
+// left as the plain string it has always been.
+//
+// A client older than this reads the JSON as an opaque string, which is what it
+// did with "Successfully joined room". A client newer than its SFU gets a
+// string that will not parse and keeps its own default. Neither needs the other
+// to move first.
+func (h *Handler) sendRoomJoined(conn *ThreadSafeWriter, message string) {
+	recovery.SafeExecute("WEBSOCKET", "SEND_ROOM_JOINED", func() error {
+		payload, err := json.Marshal(types.RoomJoinedData{
+			Message:                 message,
+			CallAloneTimeoutSeconds: int(h.config.CallAloneTimeout / time.Second),
+		})
+		if err != nil {
+			return err
+		}
+
+		h.debugLog("✅ Sending room_joined: %s", string(payload))
+		return conn.WriteJSON(&types.WebSocketMessage{
+			Event: types.EventRoomJoined,
+			Data:  string(payload),
 		})
 	})
 }

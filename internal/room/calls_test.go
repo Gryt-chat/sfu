@@ -270,3 +270,87 @@ func TestForgetsARoomThatWentAway(t *testing.T) {
 		t.Fatal("a deleted room must not be left in aloneSince; the next call reusing that id would end at once")
 	}
 }
+
+/*
+Saying you are still here (GRYT-715).
+
+The sweep above is the half that catches a client which never speaks. This is
+the half for the one that does: somebody watching the countdown, pressing the
+button, and expecting the call to still be there afterwards.
+*/
+
+func TestStillHereKeepsTheCallUp(t *testing.T) {
+	m := NewManager(false)
+	roomID, conns := addRoom(m, "dm_"+strings.Repeat("a1b2", 8), "lonely")
+
+	// Alone, observed, and now past the deadline — the next sweep would end it.
+	m.EndAbandonedCalls(testTimeout)
+	rewind(m)
+
+	if !m.StillHere(roomID) {
+		t.Fatal("pressing stay in a call that is about to end should move its clock")
+	}
+
+	m.EndAbandonedCalls(testTimeout)
+	settle()
+	if conns["lonely"].isClosed() {
+		t.Fatal("somebody said they were still here and was hung up on anyway")
+	}
+}
+
+func TestStillHereBuysAWholeTimeoutEachTime(t *testing.T) {
+	m := NewManager(false)
+	roomID, conns := addRoom(m, "dm_"+strings.Repeat("a1b2", 8), "lonely")
+
+	// Three presses, each one from a call already past its deadline. A reprieve
+	// that could only be taken once would end the call on the second.
+	for i := 0; i < 3; i++ {
+		m.EndAbandonedCalls(testTimeout)
+		rewind(m)
+		m.StillHere(roomID)
+		m.EndAbandonedCalls(testTimeout)
+		settle()
+		if conns["lonely"].isClosed() {
+			t.Fatalf("hung up on after press %d; the clock restarts, it is not a single reprieve", i+1)
+		}
+	}
+
+	// And the sweep still works afterwards: stop pressing and it ends.
+	rewind(m)
+	m.EndAbandonedCalls(testTimeout)
+	if !waitClosed(t, conns["lonely"]) {
+		t.Fatal("once nobody is pressing it, the call has to end like any other")
+	}
+}
+
+func TestStillHereIgnoresAVoiceChannel(t *testing.T) {
+	m := NewManager(false)
+	roomID, _ := addRoom(m, "general", "waiting")
+
+	if m.StillHere(roomID) {
+		t.Fatal("a voice channel has no clock to restart, so nothing should be written for one")
+	}
+
+	m.mutex.Lock()
+	_, tracked := m.aloneSince[roomID]
+	m.mutex.Unlock()
+	if tracked {
+		t.Fatal("a client in a channel must not be able to put entries in aloneSince")
+	}
+}
+
+func TestStillHereIgnoresARoomThatIsGone(t *testing.T) {
+	m := NewManager(false)
+	roomID := testServerID + "_dm_" + strings.Repeat("a1b2", 8)
+
+	if m.StillHere(roomID) {
+		t.Fatal("a room that does not exist has no clock")
+	}
+
+	m.mutex.Lock()
+	_, tracked := m.aloneSince[roomID]
+	m.mutex.Unlock()
+	if tracked {
+		t.Fatal("naming a room that is not there must not create an entry for it")
+	}
+}

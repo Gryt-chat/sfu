@@ -69,6 +69,25 @@ type SetLayerData struct {
 	MaxTemporalLayer int    `json:"max_temporal_layer"` // -1 = all layers, 0 = T0 only, 1 = T0+T1, 2 = T0+T1+T2
 }
 
+// RoomJoinedData is the payload of the room_joined a client gets on joining.
+//
+// The server connection gets a plain string on the same event, from
+// sendSuccessToConnection. Only the client join carries this, because only a
+// client has a countdown to draw.
+type RoomJoinedData struct {
+	Message string `json:"message"`
+
+	// CallAloneTimeoutSeconds is how long this SFU lets one person sit alone in
+	// a call before it ends it — SFU_CALL_ALONE_TIMEOUT, in seconds, with zero
+	// meaning the sweep is off.
+	//
+	// Sent so the client stops guessing. The client used to carry its own copy
+	// of the default, which was right until an operator changed theirs: raising
+	// it made the client leave early, and turning it off left a client that
+	// still hung up after two minutes on a call the SFU was happy to keep.
+	CallAloneTimeoutSeconds int `json:"call_alone_timeout_seconds"`
+}
+
 // Supported WebSocket message events
 const (
 	EventOffer            = "offer"
@@ -87,4 +106,5 @@ const (
 	EventSyncRequest      = "sync_request"
 	EventSyncResponse     = "sync_response"
 	EventSetLayer         = "set_layer"
+	EventStillHere        = "still_here"
 )

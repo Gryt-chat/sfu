@@ -148,3 +148,49 @@ func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 		return nil
 	})
 }
+
+// StillHere restarts the alone clock for a room, and reports whether it did.
+//
+// This is somebody pressing "stay in the call" (GRYT-715). GRYT-711 gave the
+// SFU a clock the client could not reach, so the client's countdown could only
+// tell you what was about to happen; there was no button, because a button
+// that did not move this clock would have been a lie.
+//
+// It restarts rather than granting one reprieve. Pressing it and then walking
+// off buys another full timeout, which is the right answer — somebody was at
+// the keyboard when they pressed it, and that is the entire thing the sweep is
+// trying to find out. There is no cap either: a call one person is deliberately
+// holding open is a call, and the person holding it is present by definition.
+// What the sweep exists to catch is the client that never speaks.
+//
+// Writing `now` rather than deleting the entry, so the clock restarts here
+// instead of on the next sweep, up to fifteen seconds later.
+func (m *Manager) StillHere(roomID string) bool {
+	moved := false
+
+	recovery.SafeExecuteWithContext("ROOM_MANAGER", "STILL_HERE", "", roomID, "Restarting the alone clock", func() error {
+		m.mutex.Lock()
+		defer m.mutex.Unlock()
+
+		room, exists := m.rooms[roomID]
+		if !exists {
+			return nil
+		}
+
+		// Only calls, so a client cannot fill the map with entries for rooms
+		// the sweep will never look at. A voice channel is never ended for
+		// being quiet, so it has no clock to restart.
+		room.mutex.RLock()
+		isCall := IsCallRoom(roomID, room.ServerID)
+		room.mutex.RUnlock()
+		if !isCall {
+			return nil
+		}
+
+		m.aloneSince[roomID] = time.Now()
+		moved = true
+		return nil
+	})
+
+	return moved
+}
