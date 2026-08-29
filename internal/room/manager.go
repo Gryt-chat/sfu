@@ -38,8 +38,12 @@ type Manager struct {
 	serverToRooms     map[string][]string
 	registeredServers map[string]string     // serverID -> serverPassword
 	serverConns       map[string]JSONWriter // serverID -> server WebSocket connection
-	mutex             sync.RWMutex
-	debug             bool
+	// When a call room was first seen holding one person and nobody else. Kept
+	// by the sweep in calls.go rather than by the paths that add and remove
+	// peers — see EndAbandonedCalls for why. Guarded by mutex.
+	aloneSince map[string]time.Time
+	mutex      sync.RWMutex
+	debug      bool
 }
 
 // NewManager creates a new room manager
@@ -49,6 +53,7 @@ func NewManager(debug bool) *Manager {
 		serverToRooms:     make(map[string][]string),
 		registeredServers: make(map[string]string),
 		serverConns:       make(map[string]JSONWriter),
+		aloneSince:        make(map[string]time.Time),
 		debug:             debug,
 	}
 }

@@ -50,6 +50,7 @@ Every variable the SFU reads, and nothing it doesn't:
 | `MAX_PEERS` | `200` | How many peers may be connected at once |
 | `SFU_PING_INTERVAL` | `30` | Seconds between WebSocket pings. `0` switches pinging and the read deadline off |
 | `SFU_PONG_TIMEOUT` | `90` | Seconds a peer may say nothing before the SFU hangs up. Raised to two ping intervals if set lower |
+| `SFU_CALL_ALONE_TIMEOUT` | `120` | Seconds one person may be the only one in a call before it ends. `0` leaves it up. Calls only — a voice channel is never ended for being quiet |
 | `DEBUG` | `true` | Room, connection and signaling logging. Defaults on when unset |
 | `VERBOSE_LOG` | `false` | RTP forwarding detail |
 

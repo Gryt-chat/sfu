@@ -168,3 +168,58 @@ func TestUnreadablePingValuesFallBack(t *testing.T) {
 		}
 	}
 }
+
+// Ending a call somebody is alone in is the one setting here that hangs up on
+// a person who is doing nothing wrong, so both the default and the off switch
+// have to be exactly what they say.
+
+func TestCallAloneTimeoutDefaultsWhenUnset(t *testing.T) {
+	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CallAloneTimeout != DefaultCallAloneTimeout {
+		t.Errorf("call alone timeout = %s, want %s", cfg.CallAloneTimeout, DefaultCallAloneTimeout)
+	}
+}
+
+func TestCallAloneTimeoutIsTakenFromTheEnvironment(t *testing.T) {
+	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "300")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CallAloneTimeout != 5*time.Minute {
+		t.Errorf("call alone timeout = %s, want 5m", cfg.CallAloneTimeout)
+	}
+}
+
+func TestCallAloneTimeoutZeroIsOff(t *testing.T) {
+	// Zero has to survive as zero rather than falling back to the default,
+	// which is the whole point of reading it the long way round: this is how a
+	// server owner says a call should stay up until somebody closes it.
+	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "0")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CallAloneTimeout != 0 {
+		t.Errorf("call alone timeout = %s, want 0 — zero is the off switch, not an absence", cfg.CallAloneTimeout)
+	}
+}
+
+func TestCallAloneTimeoutIgnoresNonsense(t *testing.T) {
+	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "two minutes")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CallAloneTimeout != DefaultCallAloneTimeout {
+		t.Errorf("call alone timeout = %s, want the default back", cfg.CallAloneTimeout)
+	}
+}
