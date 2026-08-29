@@ -139,7 +139,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 		// Send success message
 		h.debugLog("✅ Client %s successfully joined room '%s'", clientID, joinData.RoomID)
-		h.sendSuccessToConnection(conn, "Successfully joined room")
+		h.sendRoomJoined(conn, "Successfully joined room")
 
 		// Set up WebRTC event handlers with recovery
 		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID)
