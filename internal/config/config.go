@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -90,21 +91,10 @@ func Load() (*Config, error) {
 		port = "5005"
 	}
 
-	disableSTUN, _ := strconv.ParseBool(os.Getenv("DISABLE_STUN"))
-
 	stunServers := strings.Split(os.Getenv("STUN_SERVERS"), ",")
 	if len(stunServers) == 1 && stunServers[0] == "" {
 		// Default STUN servers if none provided
 		stunServers = []string{"stun:stun.l.google.com:19302"}
-	}
-
-	iceServers := []webrtc.ICEServer{}
-	if !disableSTUN {
-		iceServers = []webrtc.ICEServer{
-			{
-				URLs: stunServers,
-			},
-		}
 	}
 
 	// One UDP port for all media. Unset it is 3478: the IANA STUN port,
@@ -119,12 +109,75 @@ func Load() (*Config, error) {
 	if iceUDPMuxPort <= 0 || iceUDPMuxPort > 65535 {
 		iceUDPMuxPort = DefaultICEUDPMuxPort
 	}
+
+	// Parsed before the STUN decision below, because whether an operator has
+	// forced an address is what decides the default for DISABLE_STUN.
+	//
+	// Entries are validated rather than passed through. A value that is not an
+	// IP at all can never become a candidate, so it is dropped and said out
+	// loud — the failure is otherwise invisible, because the SFU keeps working
+	// on whatever else is in the list and nobody finds out it is wrong.
 	var iceAdvertiseIPs []string
+	hasRoutableAdvertiseIP := false
 	if raw := os.Getenv("ICE_ADVERTISE_IP"); raw != "" {
-		for _, ip := range strings.Split(raw, ",") {
-			if t := strings.TrimSpace(ip); t != "" {
-				iceAdvertiseIPs = append(iceAdvertiseIPs, t)
+		for _, entry := range strings.Split(raw, ",") {
+			t := strings.TrimSpace(entry)
+			if t == "" {
+				continue
 			}
+			parsed := net.ParseIP(t)
+			if parsed == nil {
+				log.Printf("Warning: ICE_ADVERTISE_IP entry %q is not an IP address; ignoring it", t)
+				continue
+			}
+			iceAdvertiseIPs = append(iceAdvertiseIPs, t)
+			if !(parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsLinkLocalUnicast()) {
+				hasRoutableAdvertiseIP = true
+			}
+		}
+	}
+
+	// A private address alongside a public one is the ordinary multi-network
+	// setup: peers on the LAN take the short path and everybody else comes in
+	// over the public address. Warning about that would be noise. A list with
+	// no routable address in it at all is the real problem, because the SFU
+	// then has nothing to offer anybody outside the network, and it fails the
+	// same quiet way the rest of this guards against.
+	if len(iceAdvertiseIPs) > 0 && !hasRoutableAdvertiseIP {
+		log.Printf("Warning: no ICE_ADVERTISE_IP entry is routable from outside this network (%s); peers elsewhere will not be able to connect",
+			strings.Join(iceAdvertiseIPs, ", "))
+	}
+
+	// STUN discovers the address the internet sees this host as. That is the
+	// right default when nothing else knows it, and the wrong one once an
+	// operator has said what to advertise: discovery then adds a candidate
+	// nobody chose, carrying whatever address the current egress path happens
+	// to have. If that path changes — a tunnel goes down and traffic falls back
+	// to the ordinary route — the SFU quietly starts handing out the new
+	// address instead of failing, and calls keep working, so nothing surfaces
+	// it. GRYT-768.
+	//
+	// So forcing an address turns discovery off unless the operator says
+	// otherwise. Setting DISABLE_STUN explicitly always wins, in either
+	// direction.
+	disableSTUN := len(iceAdvertiseIPs) > 0
+	if raw := strings.TrimSpace(os.Getenv("DISABLE_STUN")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			log.Printf("Warning: DISABLE_STUN=%q is not a boolean; using %t", raw, disableSTUN)
+		} else {
+			disableSTUN = parsed
+		}
+	} else if disableSTUN {
+		log.Printf("ICE_ADVERTISE_IP is set, so STUN discovery is off; set DISABLE_STUN=false to gather server-reflexive candidates as well")
+	}
+
+	iceServers := []webrtc.ICEServer{}
+	if !disableSTUN {
+		iceServers = []webrtc.ICEServer{
+			{
+				URLs: stunServers,
+			},
 		}
 	}
 

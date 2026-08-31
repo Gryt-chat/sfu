@@ -223,3 +223,121 @@ func TestCallAloneTimeoutIgnoresNonsense(t *testing.T) {
 		t.Errorf("call alone timeout = %s, want the default back", cfg.CallAloneTimeout)
 	}
 }
+
+// Forcing an address turns discovery off by itself. Without this the SFU keeps
+// gathering a server-reflexive candidate carrying whatever address its current
+// egress happens to have, which is how a stale advertised address goes
+// unnoticed: the reflexive one quietly carries the call instead. GRYT-768.
+func TestForcingAnAddressDisablesSTUN(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10")
+	t.Setenv("DISABLE_STUN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DisableSTUN {
+		t.Fatal("DisableSTUN = false, want true when ICE_ADVERTISE_IP is set")
+	}
+	if len(cfg.ICEServers) != 0 {
+		t.Fatalf("ICEServers = %v, want none so no reflexive candidate is gathered", cfg.ICEServers)
+	}
+}
+
+// Nothing forced means nothing is known about the public address, which is
+// exactly when discovery earns its place.
+func TestSTUNStaysOnWithoutAnAdvertisedAddress(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "")
+	t.Setenv("DISABLE_STUN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DisableSTUN {
+		t.Fatal("DisableSTUN = true, want false when no address is forced")
+	}
+	if len(cfg.ICEServers) == 0 {
+		t.Fatal("ICEServers is empty, want the STUN servers")
+	}
+}
+
+// The default is a default, not a rule. An operator who wants both a forced
+// address and discovery says so and gets it.
+func TestExplicitDisableSTUNWinsBothWays(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10")
+	t.Setenv("DISABLE_STUN", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DisableSTUN {
+		t.Fatal("DisableSTUN = true, want false when set explicitly alongside a forced address")
+	}
+
+	t.Setenv("ICE_ADVERTISE_IP", "")
+	t.Setenv("DISABLE_STUN", "true")
+
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DisableSTUN {
+		t.Fatal("DisableSTUN = false, want true when set explicitly with no forced address")
+	}
+}
+
+// A value that is not an IP can never become a candidate, so it is dropped
+// rather than carried into the rewrite rules where it would fail silently.
+func TestAdvertisedAddressesThatAreNotIPsAreDropped(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10, sfu.example.com, ,198.51.100.4")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"203.0.113.10", "198.51.100.4"}
+	if len(cfg.ICEAdvertiseIPs) != len(want) {
+		t.Fatalf("advertised = %v, want %v", cfg.ICEAdvertiseIPs, want)
+	}
+	for i, w := range want {
+		if cfg.ICEAdvertiseIPs[i] != w {
+			t.Fatalf("advertised[%d] = %q, want %q", i, cfg.ICEAdvertiseIPs[i], w)
+		}
+	}
+}
+
+// A private address is kept, because a LAN peer really can use it, but it is
+// worth warning about: on its own it means nobody outside the network can
+// connect. A stale one is how that happens without anybody noticing.
+func TestPrivateAdvertisedAddressIsKept(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10,192.168.1.50")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ICEAdvertiseIPs) != 2 {
+		t.Fatalf("advertised = %v, want both entries kept", cfg.ICEAdvertiseIPs)
+	}
+}
+
+// A LAN address next to a public one is the documented multi-network setup, so
+// both are kept: peers on the LAN take the short path, everybody else comes in
+// over the public address. Dropping the private one would push LAN peers out to
+// the public address and back.
+func TestPublicAndPrivateAdvertisedAddressesAreBothKept(t *testing.T) {
+	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10,192.168.50.147")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"203.0.113.10", "192.168.50.147"}
+	for i, w := range want {
+		if cfg.ICEAdvertiseIPs[i] != w {
+			t.Fatalf("advertised[%d] = %q, want %q", i, cfg.ICEAdvertiseIPs[i], w)
+		}
+	}
+}
