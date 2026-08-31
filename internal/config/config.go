@@ -214,10 +214,21 @@ func Load() (*Config, error) {
 	}
 
 	// Debug configuration
-	// Off by default so this build can be deployed before the servers that mint
-	// tokens. Turn it on as soon as they have shipped: while it is off, the hole
-	// this replaces is still open to anybody who kept the old password.
-	requireClientToken, _ := strconv.ParseBool(os.Getenv("SFU_REQUIRE_CLIENT_TOKEN"))
+	// On unless somebody says otherwise. Defaulting this off left every
+	// deployment running with the hole open until an operator flipped a flag
+	// they had no reason to know about, which is not a default so much as a
+	// promise to remember. A staged upgrade that has to run this SFU against
+	// servers too old to mint tokens sets it to false for the duration, and
+	// that is a decision somebody makes rather than one they inherit.
+	requireClientToken := true
+	if raw := strings.TrimSpace(os.Getenv("SFU_REQUIRE_CLIENT_TOKEN")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			log.Printf("Warning: SFU_REQUIRE_CLIENT_TOKEN=%q is not a boolean; requiring client tokens", raw)
+		} else {
+			requireClientToken = parsed
+		}
+	}
 
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))

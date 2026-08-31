@@ -341,3 +341,43 @@ func TestPublicAndPrivateAdvertisedAddressesAreBothKept(t *testing.T) {
 		}
 	}
 }
+
+// Defaulting this off meant every deployment ran with the legacy join path open
+// until somebody flipped a flag they had no reason to know about. GRYT-772.
+func TestClientTokensAreRequiredUnlessSaidOtherwise(t *testing.T) {
+	t.Setenv("SFU_REQUIRE_CLIENT_TOKEN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RequireClientToken {
+		t.Fatal("RequireClientToken = false, want true when the variable is unset")
+	}
+}
+
+// The escape hatch a staged upgrade needs, and nothing more.
+func TestTheLegacyPathCanBeReopenedDeliberately(t *testing.T) {
+	t.Setenv("SFU_REQUIRE_CLIENT_TOKEN", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RequireClientToken {
+		t.Fatal("RequireClientToken = true, want false when explicitly disabled")
+	}
+}
+
+// Rubbish must not read as "false" and silently reopen the old path.
+func TestAnUnparseableValueStillRequiresTokens(t *testing.T) {
+	t.Setenv("SFU_REQUIRE_CLIENT_TOKEN", "yes-please")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RequireClientToken {
+		t.Fatal("RequireClientToken = false, want true: an unparseable value must fail closed")
+	}
+}

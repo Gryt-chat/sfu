@@ -162,7 +162,7 @@ func main() {
 		if cfg.RequireClientToken {
 			log.Printf("🔒 Client tokens required; the legacy shared-password join path is off")
 		} else {
-			log.Printf("⚠️  Legacy shared-password joins are still accepted; set SFU_REQUIRE_CLIENT_TOKEN=true once every server mints tokens (GRYT-736)")
+			log.Printf("⚠️  SFU_REQUIRE_CLIENT_TOKEN=false: clients may still join by presenting the server password, which every browser used to be given. Only for a staged upgrade; unset it once the servers mint tokens (GRYT-736)")
 		}
 		log.Printf("✅ Room manager initialized (debug: %t)", cfg.Debug)
 		return nil
