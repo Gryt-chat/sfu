@@ -246,7 +246,32 @@ func main() {
 		fmt.Fprintf(w, `{"status":"healthy","service":"sfu","version":"%s","timestamp":"%s"}`, Version, ts)
 	})
 
-	http.Handle("/metrics", promhttp.Handler())
+	// Metrics get a listener of their own, and it is not the one the world talks
+	// to. Registered on the default mux, /metrics sat beside the signalling
+	// WebSocket, so every deployment behind a reverse proxy or a tunnel published
+	// its full Prometheus register to anybody who asked.
+	//
+	// A separate port rather than a token, because a token is only safe for
+	// people who set one, and the monitoring stack in the Compose file is opt-in
+	// — most deployments run no Prometheus at all and would have kept the
+	// exposure while gaining nothing.
+	//
+	// Prometheus reaches it as `sfu:<port>` over the Compose network, so the port
+	// needs no publishing. Publishing it, or running with host networking, puts
+	// it back on the public internet.
+	if cfg.MetricsPort > 0 {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", promhttp.Handler())
+		addr := fmt.Sprintf(":%d", cfg.MetricsPort)
+		recovery.SafeGoroutine("MAIN", "METRICS_LISTENER", func() {
+			log.Printf("📊 Metrics on %d (container-only; do not publish this port)", cfg.MetricsPort)
+			if err := http.ListenAndServe(addr, metricsMux); err != nil {
+				log.Printf("❌ Metrics listener stopped: %v", err)
+			}
+		})
+	} else {
+		log.Printf("📊 SFU_METRICS_PORT=0, so metrics are recorded but not served anywhere")
+	}
 
 	// Periodically sync room/peer gauges with actual state
 	recovery.SafeGoroutine("MAIN", "METRICS_SYNC", func() {

@@ -381,3 +381,62 @@ func TestAnUnparseableValueStillRequiresTokens(t *testing.T) {
 		t.Fatal("RequireClientToken = false, want true: an unparseable value must fail closed")
 	}
 }
+
+// Metrics moved off the port the world talks to. Registered on the default mux
+// they sat beside the signalling WebSocket, so anything fronting the SFU served
+// the Prometheus register to strangers. GRYT-741.
+func TestMetricsGetTheirOwnPortByDefault(t *testing.T) {
+	t.Setenv("SFU_METRICS_PORT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MetricsPort != 9091 {
+		t.Fatalf("MetricsPort = %d, want 9091", cfg.MetricsPort)
+	}
+	if cfg.MetricsPort == cfg.ICEUDPMuxPort {
+		t.Fatal("metrics must not share the media port")
+	}
+}
+
+func TestMetricsPortIsConfigurable(t *testing.T) {
+	t.Setenv("SFU_METRICS_PORT", "9200")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MetricsPort != 9200 {
+		t.Fatalf("MetricsPort = %d, want 9200", cfg.MetricsPort)
+	}
+}
+
+// Zero is a deliberate "do not serve them at all", which has to survive rather
+// than being read as unset and replaced by the default.
+func TestMetricsCanBeTurnedOff(t *testing.T) {
+	t.Setenv("SFU_METRICS_PORT", "0")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MetricsPort != 0 {
+		t.Fatalf("MetricsPort = %d, want 0", cfg.MetricsPort)
+	}
+}
+
+// Rubbish must not silently land on the main port or on something unroutable.
+func TestAnUnparseableMetricsPortFallsBack(t *testing.T) {
+	for _, v := range []string{"not-a-port", "-1", "70000"} {
+		t.Setenv("SFU_METRICS_PORT", v)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MetricsPort != 9091 {
+			t.Fatalf("SFU_METRICS_PORT=%q gave %d, want the 9091 default", v, cfg.MetricsPort)
+		}
+	}
+}
