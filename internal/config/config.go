@@ -64,6 +64,10 @@ type Config struct {
 	// internal/auth: until this is on, knowing the old password is still enough.
 	RequireClientToken bool
 
+	// Where Prometheus metrics are served. Deliberately not the main port; see
+	// cmd/sfu/main.go. Zero switches serving them off entirely.
+	MetricsPort int
+
 	// Capacity guardrail. Nothing to do with ports any more: one muxed port
 	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
@@ -230,6 +234,15 @@ func Load() (*Config, error) {
 		}
 	}
 
+	metricsPort := 9091
+	if raw := strings.TrimSpace(os.Getenv("SFU_METRICS_PORT")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 && parsed <= 65535 {
+			metricsPort = parsed
+		} else {
+			log.Printf("Warning: SFU_METRICS_PORT=%q is not a port; using %d", raw, metricsPort)
+		}
+	}
+
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
 
@@ -248,6 +261,7 @@ func Load() (*Config, error) {
 		ICEAdvertiseIPs:    iceAdvertiseIPs,
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
+		MetricsPort:        metricsPort,
 		MaxPeers:           maxPeers,
 		PingInterval:       pingInterval,
 		PongTimeout:        pongTimeout,
