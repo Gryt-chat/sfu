@@ -56,7 +56,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		h.debugLog("👤 Client %s attempting to join room '%s' (Server: %s)", clientID, joinData.RoomID, joinData.ServerID)
 
 		// Validate client can join the room
-		if err := h.roomManager.ValidateClientJoin(joinData.RoomID, joinData.ServerID, joinData.ServerPassword); err != nil {
+		if err := h.roomManager.ValidateClientJoin(joinData.RoomID, joinData.ServerID, joinData.ServerPassword, joinData.UserToken, joinData.UserID); err != nil {
 			h.debugLog("❌ Client join validation failed for %s: %v", clientID, err)
 			h.sendErrorToConnection(conn, "Join validation failed: "+err.Error())
 			return err

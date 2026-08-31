@@ -158,6 +158,12 @@ func main() {
 	// Initialize room manager with recovery
 	err = recovery.SafeExecute("MAIN", "INIT_ROOM_MANAGER", func() error {
 		roomManager = room.NewManager(cfg.Debug)
+		roomManager.SetRequireClientToken(cfg.RequireClientToken)
+		if cfg.RequireClientToken {
+			log.Printf("🔒 Client tokens required; the legacy shared-password join path is off")
+		} else {
+			log.Printf("⚠️  Legacy shared-password joins are still accepted; set SFU_REQUIRE_CLIENT_TOKEN=true once every server mints tokens (GRYT-736)")
+		}
 		log.Printf("✅ Room manager initialized (debug: %t)", cfg.Debug)
 		return nil
 	})

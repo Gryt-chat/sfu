@@ -60,6 +60,10 @@ type Config struct {
 	ICEAdvertiseIPs []string
 	DisableSTUN     bool
 
+	// RequireClientToken refuses the legacy shared-password join path. See
+	// internal/auth: until this is on, knowing the old password is still enough.
+	RequireClientToken bool
+
 	// Capacity guardrail. Nothing to do with ports any more: one muxed port
 	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
@@ -210,6 +214,11 @@ func Load() (*Config, error) {
 	}
 
 	// Debug configuration
+	// Off by default so this build can be deployed before the servers that mint
+	// tokens. Turn it on as soon as they have shipped: while it is off, the hole
+	// this replaces is still open to anybody who kept the old password.
+	requireClientToken, _ := strconv.ParseBool(os.Getenv("SFU_REQUIRE_CLIENT_TOKEN"))
+
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
 
@@ -219,17 +228,18 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port:            port,
-		STUNServers:     stunServers,
-		ICEServers:      iceServers,
-		Debug:           debug,
-		VerboseLog:      verboseLog,
-		ICEUDPMuxPort:   iceUDPMuxPort,
-		ICEAdvertiseIPs: iceAdvertiseIPs,
-		DisableSTUN:     disableSTUN,
-		MaxPeers:        maxPeers,
-		PingInterval:    pingInterval,
-		PongTimeout:     pongTimeout,
+		Port:               port,
+		STUNServers:        stunServers,
+		ICEServers:         iceServers,
+		Debug:              debug,
+		VerboseLog:         verboseLog,
+		ICEUDPMuxPort:      iceUDPMuxPort,
+		ICEAdvertiseIPs:    iceAdvertiseIPs,
+		DisableSTUN:        disableSTUN,
+		RequireClientToken: requireClientToken,
+		MaxPeers:           maxPeers,
+		PingInterval:       pingInterval,
+		PongTimeout:        pongTimeout,
 
 		CallAloneTimeout: callAloneTimeout,
 	}, nil
