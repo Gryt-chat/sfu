@@ -10,9 +10,17 @@ import (
 
 	"github.com/pion/webrtc/v4"
 
+	"sfu-v2/internal/auth"
 	"sfu-v2/internal/recovery"
 	"sfu-v2/pkg/types"
 )
+
+// SetRequireClientToken turns off the legacy shared-password join path.
+func (m *Manager) SetRequireClientToken(require bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.requireClientToken = require
+}
 
 // JSONWriter is satisfied by any connection that can write JSON (e.g. ThreadSafeWriter).
 type JSONWriter interface {
@@ -44,6 +52,8 @@ type Manager struct {
 	aloneSince map[string]time.Time
 	mutex      sync.RWMutex
 	debug      bool
+	// Refuse the legacy shared-password join path. Guarded by mutex.
+	requireClientToken bool
 }
 
 // NewManager creates a new room manager
@@ -161,8 +171,18 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 	})
 }
 
-// ValidateClientJoin validates that a client can join a room and creates the room if it doesn't exist
-func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword string) error {
+// ValidateClientJoin decides whether a client may enter a room, and creates the
+// room if it does not exist yet.
+//
+// The client presents a token its server signed. That token is the thing being
+// trusted; the shared server password is not, because the server used to hand
+// it to every browser and so it is not a secret from anybody who has ever been
+// in a call. See internal/auth.
+//
+// The password path is still accepted when no token is presented, so this build
+// can be deployed before the servers that mint tokens. It logs every time it is
+// used, and it should be removed once no server relies on it.
+func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken, userID string) error {
 	return recovery.SafeExecuteWithContext("ROOM_MANAGER", "VALIDATE_CLIENT_JOIN", "", roomID, fmt.Sprintf("Server: %s", serverID), func() error {
 		m.mutex.Lock() // Use Lock instead of RLock since we might need to create a room
 		defer m.mutex.Unlock()
@@ -176,9 +196,21 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword string) er
 			return fmt.Errorf("server %s not registered", serverID)
 		}
 
-		if registeredPassword != serverPassword {
-			m.debugLog("❌ Validation failed: invalid password for server '%s'", serverID)
-			return fmt.Errorf("invalid server password for server %s", serverID)
+		switch {
+		case userToken != "":
+			if err := auth.Verify(registeredPassword, userToken, roomID, userID, time.Now()); err != nil {
+				m.debugLog("❌ Validation failed: client token rejected for user '%s' in room '%s': %v", userID, roomID, err)
+				return fmt.Errorf("client token rejected: %w", err)
+			}
+		case m.requireClientToken:
+			m.debugLog("❌ Validation failed: no client token, and SFU_REQUIRE_CLIENT_TOKEN is set")
+			return fmt.Errorf("a client token is required")
+		case registeredPassword == serverPassword:
+			// Deprecated. Anybody who has been in a call knows this value.
+			log.Printf("⚠️  Client joined room %s on server %s with a server password and no token; upgrade the server so it mints one, then set SFU_REQUIRE_CLIENT_TOKEN=true (GRYT-736)", roomID, serverID)
+		default:
+			m.debugLog("❌ Validation failed: no client token and the server password did not match, for server '%s'", serverID)
+			return fmt.Errorf("client presented neither a valid token nor a matching server password")
 		}
 
 		// Check if room exists - if not, create it automatically
