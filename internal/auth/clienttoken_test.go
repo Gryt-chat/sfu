@@ -157,3 +157,45 @@ func TestAVersionMustMatchItsFieldCount(t *testing.T) {
 		t.Fatal("a v1 token with five fields verified, want an error")
 	}
 }
+
+// ── The vectors the server pins too ──────────────────────────────────
+//
+// `src/sfu/clientToken.test.ts` in the server asserts these exact strings. The
+// server signs and this verifies, so the two implementations agreeing byte for
+// byte is the whole contract — and until now only one side pinned it, while a
+// comment there claimed both did. A drift in either would have shown up as
+// voice failing in production rather than as a test.
+
+const (
+	vectorSecret = "shared-server-secret"
+	vectorUser   = "user-abc"
+	vectorRoom   = "room-xyz"
+	vectorNonce  = "nonce-1"
+	vectorExpiry = 1788000000000
+)
+
+func TestTheV1VectorTheServerPins(t *testing.T) {
+	got := Sign(vectorSecret, vectorUser, vectorRoom, vectorNonce, time.UnixMilli(vectorExpiry))
+	want := "v1.dXNlci1hYmN8cm9vbS14eXp8MTc4ODAwMDAwMDAwMHxub25jZS0x.sRfyhPQhUzcu-oYapTqoxWvli-5pT1f1OTVl80vPE8c"
+	if got != want {
+		t.Fatalf("v1 vector drifted:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestTheV2VectorTheServerPins(t *testing.T) {
+	got := SignV2(vectorSecret, vectorUser, vectorRoom, vectorNonce, time.UnixMilli(vectorExpiry), []string{CapSpeak})
+	want := "v2.dXNlci1hYmN8cm9vbS14eXp8MTc4ODAwMDAwMDAwMHxub25jZS0xfHNwZWFr.Sl_XerGqvdjvr6PFkUIBTtaf_zBFWetug06e8elPPzk"
+	if got != want {
+		t.Fatalf("v2 vector drifted:\n got %s\nwant %s", got, want)
+	}
+}
+
+// The empty capability list is its own vector. It is the shape a denied member
+// actually gets, and the trailing separator is easy to drop on one side.
+func TestTheV2NoCapabilitiesVectorTheServerPins(t *testing.T) {
+	got := SignV2(vectorSecret, vectorUser, vectorRoom, vectorNonce, time.UnixMilli(vectorExpiry), nil)
+	want := "v2.dXNlci1hYmN8cm9vbS14eXp8MTc4ODAwMDAwMDAwMHxub25jZS0xfA.caTW8CLQDzyjZJbUzMtPb_OAsKzfH6lPOO2G9kBEeWE"
+	if got != want {
+		t.Fatalf("v2 empty-capability vector drifted:\n got %s\nwant %s", got, want)
+	}
+}
