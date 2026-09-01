@@ -182,8 +182,14 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 // The password path is still accepted when no token is presented, so this build
 // can be deployed before the servers that mint tokens. It logs every time it is
 // used, and it should be removed once no server relies on it.
-func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken, userID string) error {
-	return recovery.SafeExecuteWithContext("ROOM_MANAGER", "VALIDATE_CLIENT_JOIN", "", roomID, fmt.Sprintf("Server: %s", serverID), func() error {
+//
+// Returns what the token says the bearer may do, so the caller can gate
+// publishing. A join that succeeds without a token — the deprecated password
+// path — grants every capability, because a server old enough to use it is old
+// enough not to have a `speak` permission to express.
+func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken, userID string) (auth.Claims, error) {
+	claims := auth.Claims{Capabilities: []string{auth.CapSpeak}}
+	err := recovery.SafeExecuteWithContext("ROOM_MANAGER", "VALIDATE_CLIENT_JOIN", "", roomID, fmt.Sprintf("Server: %s", serverID), func() error {
 		m.mutex.Lock() // Use Lock instead of RLock since we might need to create a room
 		defer m.mutex.Unlock()
 
@@ -198,10 +204,12 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken
 
 		switch {
 		case userToken != "":
-			if err := auth.Verify(registeredPassword, userToken, roomID, userID, time.Now()); err != nil {
+			verified, err := auth.Verify(registeredPassword, userToken, roomID, userID, time.Now())
+			if err != nil {
 				m.debugLog("❌ Validation failed: client token rejected for user '%s' in room '%s': %v", userID, roomID, err)
 				return fmt.Errorf("client token rejected: %w", err)
 			}
+			claims = verified
 		case m.requireClientToken:
 			m.debugLog("❌ Validation failed: no client token, and SFU_REQUIRE_CLIENT_TOKEN is set")
 			return fmt.Errorf("a client token is required")
@@ -246,6 +254,10 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken
 		m.debugLog("✅ Client join validation passed for room '%s'", roomID)
 		return nil
 	})
+	if err != nil {
+		return auth.Claims{}, err
+	}
+	return claims, nil
 }
 
 // GetRoom returns a room by ID
