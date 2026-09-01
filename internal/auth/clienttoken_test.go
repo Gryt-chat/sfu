@@ -19,7 +19,7 @@ func validToken(t *testing.T) string {
 }
 
 func TestARoundTripVerifies(t *testing.T) {
-	if err := Verify(secret, validToken(t), room, user, time.Now()); err != nil {
+	if _, err := Verify(secret, validToken(t), room, user, time.Now()); err != nil {
 		t.Fatalf("verify = %v, want nil", err)
 	}
 }
@@ -27,7 +27,7 @@ func TestARoundTripVerifies(t *testing.T) {
 // The whole point: the token is only worth anything to somebody holding the
 // shared secret, which the browser no longer does.
 func TestAnotherSecretDoesNotVerify(t *testing.T) {
-	if err := Verify("some-other-secret", validToken(t), room, user, time.Now()); !errors.Is(err, ErrSignature) {
+	if _, err := Verify("some-other-secret", validToken(t), room, user, time.Now()); !errors.Is(err, ErrSignature) {
 		t.Fatalf("verify = %v, want ErrSignature", err)
 	}
 }
@@ -36,20 +36,20 @@ func TestAnotherSecretDoesNotVerify(t *testing.T) {
 // signature alone would let anybody with a valid token of their own walk into
 // any room, which is the hole this replaces rather than a new one.
 func TestATokenForAnotherRoomIsRefused(t *testing.T) {
-	if err := Verify(secret, validToken(t), "some-other-room", user, time.Now()); !errors.Is(err, ErrMismatch) {
+	if _, err := Verify(secret, validToken(t), "some-other-room", user, time.Now()); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("verify = %v, want ErrMismatch", err)
 	}
 }
 
 func TestATokenForAnotherUserIsRefused(t *testing.T) {
-	if err := Verify(secret, validToken(t), room, "someone-else", time.Now()); !errors.Is(err, ErrMismatch) {
+	if _, err := Verify(secret, validToken(t), room, "someone-else", time.Now()); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("verify = %v, want ErrMismatch", err)
 	}
 }
 
 func TestAnExpiredTokenIsRefused(t *testing.T) {
 	tok := Sign(secret, user, room, "nonce-1", time.Now().Add(-time.Second))
-	if err := Verify(secret, tok, room, user, time.Now()); !errors.Is(err, ErrExpired) {
+	if _, err := Verify(secret, tok, room, user, time.Now()); !errors.Is(err, ErrExpired) {
 		t.Fatalf("verify = %v, want ErrExpired", err)
 	}
 }
@@ -62,7 +62,7 @@ func TestATamperedPayloadIsRefused(t *testing.T) {
 	forged := Sign(secret, "attacker", room, "nonce-1", time.Now().Add(time.Minute))
 	tampered := parts[0] + "." + strings.Split(forged, ".")[1] + "." + parts[2]
 
-	if err := Verify(secret, tampered, room, "attacker", time.Now()); !errors.Is(err, ErrSignature) {
+	if _, err := Verify(secret, tampered, room, "attacker", time.Now()); !errors.Is(err, ErrSignature) {
 		t.Fatalf("verify = %v, want ErrSignature", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestRubbishIsRefusedRatherThanPanicking(t *testing.T) {
 		"v2." + strings.Split(validToken(t), ".")[1] + ".sig",
 		"v1.!!!not-base64!!!.also-not",
 	} {
-		if err := Verify(secret, tok, room, user, time.Now()); err == nil {
+		if _, err := Verify(secret, tok, room, user, time.Now()); err == nil {
 			t.Fatalf("verify(%q) = nil, want an error", tok)
 		}
 	}
@@ -83,7 +83,77 @@ func TestRubbishIsRefusedRatherThanPanicking(t *testing.T) {
 // still only valid against that same empty secret, never against a real one.
 func TestAnEmptySecretIsNotAMasterKey(t *testing.T) {
 	tok := Sign("", user, room, "nonce-1", time.Now().Add(time.Minute))
-	if err := Verify(secret, tok, room, user, time.Now()); !errors.Is(err, ErrSignature) {
+	if _, err := Verify(secret, tok, room, user, time.Now()); !errors.Is(err, ErrSignature) {
 		t.Fatalf("verify = %v, want ErrSignature", err)
+	}
+}
+
+// ── Capabilities (v2) ────────────────────────────────────────────────
+
+// The compatibility case, and the one worth having a test for: this SFU is
+// released separately from the server, so it will run against servers that
+// still mint v1. Reading those as "no capabilities" would mute every one of
+// them, and it would do it silently — the audio simply would not arrive.
+func TestAV1TokenMaySpeak(t *testing.T) {
+	claims, err := Verify(secret, validToken(t), room, user, time.Now())
+	if err != nil {
+		t.Fatalf("verify = %v, want nil", err)
+	}
+	if !claims.Can(CapSpeak) {
+		t.Fatalf("a v1 token must grant %q, got %v", CapSpeak, claims.Capabilities)
+	}
+}
+
+func TestAV2TokenGrantsWhatItCarries(t *testing.T) {
+	tok := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), []string{CapSpeak})
+	claims, err := Verify(secret, tok, room, user, time.Now())
+	if err != nil {
+		t.Fatalf("verify = %v, want nil", err)
+	}
+	if !claims.Can(CapSpeak) {
+		t.Fatalf("want %q granted, got %v", CapSpeak, claims.Capabilities)
+	}
+}
+
+func TestAV2TokenWithoutSpeakDoesNotGrantIt(t *testing.T) {
+	tok := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), nil)
+	claims, err := Verify(secret, tok, room, user, time.Now())
+	if err != nil {
+		t.Fatalf("verify = %v, want nil", err)
+	}
+	if claims.Can(CapSpeak) {
+		t.Fatalf("want %q withheld, got %v", CapSpeak, claims.Capabilities)
+	}
+}
+
+// The whole point of putting capabilities inside the signed payload. A client
+// that edits its own token to add `speak` must be refused, not believed.
+func TestAddingACapabilityBreaksTheSignature(t *testing.T) {
+	tok := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), nil)
+	parts := strings.Split(tok, ".")
+	forged := SignV2("some-other-secret", user, room, "n", time.Now().Add(time.Minute), []string{CapSpeak})
+	// Keep the real signature, swap in a payload that grants speak.
+	tampered := parts[0] + "." + strings.Split(forged, ".")[1] + "." + parts[2]
+	if _, err := Verify(secret, tampered, room, user, time.Now()); !errors.Is(err, ErrSignature) {
+		t.Fatalf("verify = %v, want ErrSignature", err)
+	}
+}
+
+// A v2 token still has to be for this user and this room. The capability field
+// is extra, not a replacement for what v1 already checked.
+func TestAV2TokenIsStillBoundToItsRoom(t *testing.T) {
+	tok := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), []string{CapSpeak})
+	if _, err := Verify(secret, tok, "some-other-room", user, time.Now()); !errors.Is(err, ErrMismatch) {
+		t.Fatalf("verify = %v, want ErrMismatch", err)
+	}
+}
+
+// A v1 token carrying a fifth field, or a v2 carrying four, is malformed rather
+// than read as far as it parses.
+func TestAVersionMustMatchItsFieldCount(t *testing.T) {
+	v2Payload := strings.Split(SignV2(secret, user, room, "n", time.Now().Add(time.Minute), nil), ".")[1]
+	v1Sig := strings.Split(Sign(secret, user, room, "n", time.Now().Add(time.Minute)), ".")[2]
+	if _, err := Verify(secret, TokenVersion+"."+v2Payload+"."+v1Sig, room, user, time.Now()); err == nil {
+		t.Fatal("a v1 token with five fields verified, want an error")
 	}
 }

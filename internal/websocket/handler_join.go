@@ -7,6 +7,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 
+	"sfu-v2/internal/auth"
 	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
 	peerManager "sfu-v2/internal/webrtc"
@@ -56,7 +57,8 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		h.debugLog("👤 Client %s attempting to join room '%s' (Server: %s)", clientID, joinData.RoomID, joinData.ServerID)
 
 		// Validate client can join the room
-		if err := h.roomManager.ValidateClientJoin(joinData.RoomID, joinData.ServerID, joinData.ServerPassword, joinData.UserToken, joinData.UserID); err != nil {
+		claims, err := h.roomManager.ValidateClientJoin(joinData.RoomID, joinData.ServerID, joinData.ServerPassword, joinData.UserToken, joinData.UserID)
+		if err != nil {
 			h.debugLog("❌ Client join validation failed for %s: %v", clientID, err)
 			h.sendErrorToConnection(conn, "Join validation failed: "+err.Error())
 			return err
@@ -142,7 +144,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		h.sendRoomJoined(conn, "Successfully joined room")
 
 		// Set up WebRTC event handlers with recovery
-		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID)
+		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, claims.Can(auth.CapSpeak))
 
 		// Signal the new peer connection to start the negotiation process
 		recovery.SafeExecuteWithContext("WEBSOCKET", "SIGNAL_PEER_CONNECTIONS", clientID, joinData.RoomID, "Starting peer signaling", func() error {
@@ -172,7 +174,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 // RemoveTrackFromRoom never ran, the track stayed in the room's map, and every
 // client that joined afterwards was forwarded a stream whose sender had left.
 // That is what "Someone" tiles for people who are gone actually were. GRYT-570.
-func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) {
+func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, canSpeak bool) {
 	// Closed once, when the peer connection reaches a state it cannot come back
 	// from. Every track's cleanup waits on this, so they all fire rather than
 	// only the one that happened to register last.
@@ -247,9 +249,25 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 	// forwarding including SVC layer filtering, so we no longer need a
 	// separate forwardRTPPackets goroutine. We block here until the remote
 	// track ends so the deferred cleanup fires at the right time.
-	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+	peerConnection.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
+
+			// Denied `speak` on this channel: drop the microphone on the floor
+			// rather than forwarding it. This is the only place the gate can be
+			// real. The client decides whether to send, and a client is the
+			// thing being restricted — anybody can run one that publishes
+			// anyway, so a check there is decoration.
+			//
+			// Returning before AddTrackToRoom means no local track, no
+			// forwarder and no subscriber ever sees it. The peer connection
+			// stays up and everything else about the call keeps working: this
+			// is somebody who may listen, not somebody being thrown out.
+			if !canSpeak && isMicrophone(peerConnection, receiver) {
+				h.debugLog("🔇 Refusing microphone from %s in room '%s': token does not grant %q", clientID, roomID, auth.CapSpeak)
+				metrics.TracksRefused.Inc()
+				return nil
+			}
 
 			trackLocal := h.trackManager.AddTrackToRoom(roomID, t, peerConnection)
 			if trackLocal == nil {
@@ -281,4 +299,30 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			return nil
 		})
 	})
+}
+
+// isMicrophone reports whether a track arrived on the transceiver this SFU set
+// aside for microphone audio.
+//
+// CreatePeerConnection adds four recvonly transceivers in a fixed order —
+// microphone audio, camera video, screen video, screen audio — and the SFU is
+// the offerer, so it is the SFU that decides the m-line order rather than the
+// client. The first one is therefore the microphone, and matching on index is
+// matching on a decision this process made.
+//
+// Kind is checked as well as position. If somebody reorders the transceivers in
+// CreatePeerConnection, this stops gating rather than starts gating the camera,
+// and a `speak` denial that quietly fails open is a smaller wrong than a video
+// call that dies for reasons nobody can find.
+func isMicrophone(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) bool {
+	if receiver == nil {
+		return false
+	}
+	for i, transceiver := range pc.GetTransceivers() {
+		if transceiver.Receiver() != receiver {
+			continue
+		}
+		return i == 0 && transceiver.Kind() == webrtc.RTPCodecTypeAudio
+	}
+	return false
 }
