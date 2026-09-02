@@ -127,11 +127,32 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 
 		m.debugLog("Attempting to register server '%s' with room '%s'", serverID, roomID)
 
+		// An empty secret is not a secret. It is the HMAC key client tokens are
+		// verified against, so registering with "" means anybody who knows a room
+		// id and a user id can mint a token this SFU accepts and walk into the
+		// room as that user. Measured, not assumed: see GRYT-786.
+		//
+		// The server side no longer sends one, generating and keeping a key
+		// instead. This refuses it here as well, because an SFU is reachable by
+		// whatever connects to it and should not depend on every server that
+		// does being a current build.
+		if serverPassword == "" {
+			log.Printf("❌ Refusing to register server %s with an empty secret. Upgrade the server; it generates one now (GRYT-786)", serverID)
+			return fmt.Errorf("server %s registered with an empty secret", serverID)
+		}
+
 		// Check if server is already registered
 		if existingPassword, exists := m.registeredServers[serverID]; exists {
 			if existingPassword != serverPassword {
 				m.debugLog("❌ Server '%s' registration failed: password mismatch", serverID)
-				return fmt.Errorf("server %s already registered with different password", serverID)
+				// Worth saying what to do about it. This SFU remembers what a
+				// server registered under its id for as long as the process
+				// lives, and nothing removes it, so a server that legitimately
+				// changed its key cannot get back in until this restarts. That
+				// is exactly what upgrading past GRYT-786 looks like, and the
+				// old message left somebody staring at a server that had done
+				// nothing wrong.
+				return fmt.Errorf("server %s is already registered with a different secret; if its key changed, restart this SFU so it forgets the old one", serverID)
 			}
 			m.debugLog("✅ Server '%s' already registered with matching password", serverID)
 		} else {
@@ -200,6 +221,16 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken
 		if !exists {
 			m.debugLog("❌ Validation failed: server '%s' not registered", serverID)
 			return fmt.Errorf("server %s not registered", serverID)
+		}
+
+		// Belt as well as braces. Registration refuses an empty secret above, so
+		// this should be unreachable; it is here because the cost of being wrong
+		// about that is every room on this server standing open. Both the token
+		// path and the deprecated password path below verify against this value,
+		// and both of them accept anything when it is "".
+		if registeredPassword == "" {
+			m.debugLog("❌ Validation failed: server '%s' has an empty secret", serverID)
+			return fmt.Errorf("server %s has an empty secret", serverID)
 		}
 
 		switch {
