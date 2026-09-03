@@ -2,12 +2,14 @@ package websocket
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
 
 	"sfu-v2/internal/auth"
+	"sfu-v2/internal/iceguard"
 	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
 	peerManager "sfu-v2/internal/webrtc"
@@ -193,6 +195,20 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 
 			h.debugLog("🔧 ICE candidate for %s: type=%s protocol=%s address=%s:%d",
 				clientID, i.Typ.String(), i.Protocol.String(), i.Address, i.Port)
+
+			/* Checked on the way out, not only rewritten on the way in.
+			 *
+			 * The rewrite rule covers host candidates and STUN is off by
+			 * default when ICE_ADVERTISE_IP is set, so in the shipped
+			 * configuration this never fires. It fires for an operator who
+			 * turns STUN back on, which is the configuration GRYT-768 leaked a
+			 * private address from — and it will fire for whatever gathers a
+			 * candidate next, which is the part worth having. */
+			if !iceguard.Allowed(i.Address, h.config.ICEAdvertiseIPs) {
+				log.Printf("🧊 Dropping ICE candidate for %s: address %s is not in ICE_ADVERTISE_IP (type=%s)",
+					clientID, i.Address, i.Typ.String())
+				return nil
+			}
 
 			candidateString, err := recovery.SafeJSONMarshal(i.ToJSON())
 			if err != nil {
