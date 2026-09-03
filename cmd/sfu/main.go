@@ -107,37 +107,9 @@ func main() {
 
 	// Build a Pion WebRTC API with a configured SettingEngine (UDP port range, advertised IP, etc.)
 	err = recovery.SafeExecute("MAIN", "INIT_WEBRTC_API", func() error {
-		se := pion.SettingEngine{}
-
-		// All ICE traffic flows over one UDP port. A single port is far easier
-		// to get through a firewall than a range, and networks that drop UDP on
-		// high ports let it through when it is a port they recognise.
-		udpMux, muxErr := ice.NewMultiUDPMuxFromPort(
-			cfg.ICEUDPMuxPort,
-			ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress),
-		)
-		if muxErr != nil {
-			return fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
-		}
-		se.SetICEUDPMux(udpMux)
-		log.Printf("🧊 ICE UDP mux on port: %d", cfg.ICEUDPMuxPort)
-		// Where, not just which port. The mux binds one socket per interface
-		// address rather than a wildcard, so an address that is missing here is
-		// an address media cannot arrive on, whatever the firewall says. That
-		// is invisible otherwise: a VPN adapter that came up after the process,
-		// or an interface that was down at startup, both look like a working
-		// SFU right up until somebody tries to reach it that way. GRYT-482.
-		muxV4, muxV6 := muxAddresses(udpMux, strconv.Itoa(cfg.ICEUDPMuxPort))
-		logBoundAddresses("🧊 ICE UDP mux bound on", muxV4, muxV6)
-		if len(cfg.ICEAdvertiseIPs) > 0 {
-			if rewriteErr := se.SetICEAddressRewriteRules(pion.ICEAddressRewriteRule{
-				External:        cfg.ICEAdvertiseIPs,
-				AsCandidateType: pion.ICECandidateTypeHost,
-				Mode:            pion.ICEAddressRewriteReplace,
-			}); rewriteErr != nil {
-				return fmt.Errorf("failed to set ICE address rewrite rules: %w", rewriteErr)
-			}
-			log.Printf("🧊 ICE address rewrite (host replace): %v", cfg.ICEAdvertiseIPs)
+		se, seErr := newSettingEngine(cfg)
+		if seErr != nil {
+			return seErr
 		}
 		me := &pion.MediaEngine{}
 		if err := registerCodecs(me); err != nil {
@@ -460,6 +432,51 @@ func describe(ip net.IP, port string, names map[string]string) string {
 	}
 
 	return fmt.Sprintf("%s:%s", ip, port)
+}
+
+// newSettingEngine builds the ICE half of the WebRTC API from the config.
+//
+// Extracted from main so a test can build the same engine and gather against
+// it. What this configures is the one thing nobody was watching: the original
+// address leak in GRYT-768 survived for weeks because voice kept working, and
+// a wrong answer here looks exactly like a right one until somebody reads an
+// SDP.
+func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
+	se := pion.SettingEngine{}
+
+	// All ICE traffic flows over one UDP port. A single port is far easier
+	// to get through a firewall than a range, and networks that drop UDP on
+	// high ports let it through when it is a port they recognise.
+	udpMux, muxErr := ice.NewMultiUDPMuxFromPort(
+		cfg.ICEUDPMuxPort,
+		ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress),
+	)
+	if muxErr != nil {
+		return se, fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
+	}
+	se.SetICEUDPMux(udpMux)
+	log.Printf("🧊 ICE UDP mux on port: %d", cfg.ICEUDPMuxPort)
+	// Where, not just which port. The mux binds one socket per interface
+	// address rather than a wildcard, so an address that is missing here is
+	// an address media cannot arrive on, whatever the firewall says. That
+	// is invisible otherwise: a VPN adapter that came up after the process,
+	// or an interface that was down at startup, both look like a working
+	// SFU right up until somebody tries to reach it that way. GRYT-482.
+	muxV4, muxV6 := muxAddresses(udpMux, strconv.Itoa(cfg.ICEUDPMuxPort))
+	logBoundAddresses("🧊 ICE UDP mux bound on", muxV4, muxV6)
+
+	if len(cfg.ICEAdvertiseIPs) > 0 {
+		if rewriteErr := se.SetICEAddressRewriteRules(pion.ICEAddressRewriteRule{
+			External:        cfg.ICEAdvertiseIPs,
+			AsCandidateType: pion.ICECandidateTypeHost,
+			Mode:            pion.ICEAddressRewriteReplace,
+		}); rewriteErr != nil {
+			return se, fmt.Errorf("failed to set ICE address rewrite rules: %w", rewriteErr)
+		}
+		log.Printf("🧊 ICE address rewrite (host replace): %v", cfg.ICEAdvertiseIPs)
+	}
+
+	return se, nil
 }
 
 func shouldBindICEUDPAddress(ip net.IP) bool {
