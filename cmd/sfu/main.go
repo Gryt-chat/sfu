@@ -218,19 +218,16 @@ func main() {
 		fmt.Fprintf(w, `{"status":"healthy","service":"sfu","version":"%s","timestamp":"%s"}`, Version, ts)
 	})
 
-	// Metrics get a listener of their own, and it is not the one the world talks
-	// to. Registered on the default mux, /metrics sat beside the signalling
-	// WebSocket, so every deployment behind a reverse proxy or a tunnel published
-	// its full Prometheus register to anybody who asked.
+	// Metrics get a listener of their own, not the one the world talks to. On
+	// the default mux, /metrics sat beside the signalling WebSocket and
+	// published the full Prometheus register to anybody behind a proxy.
 	//
-	// A separate port rather than a token, because a token is only safe for
-	// people who set one, and the monitoring stack in the Compose file is opt-in
-	// — most deployments run no Prometheus at all and would have kept the
-	// exposure while gaining nothing.
+	// A separate port rather than a token, since a token is only safe for people
+	// who set one and the monitoring stack is opt-in.
 	//
-	// Prometheus reaches it as `sfu:<port>` over the Compose network, so the port
-	// needs no publishing. Publishing it, or running with host networking, puts
-	// it back on the public internet.
+	// **Publishing this port, or running with host networking, puts it back on
+	// the public internet.** Prometheus reaches it as `sfu:<port>` over the
+	// Compose network and needs no published port.
 	if cfg.MetricsPort > 0 {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())

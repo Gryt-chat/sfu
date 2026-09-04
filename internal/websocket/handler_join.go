@@ -162,20 +162,15 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 // setupWebRTCHandlers sets up WebRTC event handlers with crash protection.
 //
-// One OnConnectionStateChange registration, and that is load-bearing rather
-// than tidiness. pion's OnConnectionStateChange is handler.Store(f) — it
-// replaces the handler instead of adding one — so a second registration
-// anywhere silently turns the first one off.
+// **Exactly one OnConnectionStateChange registration.** pion's is
+// `handler.Store(f)`, which replaces rather than adds, so a second one anywhere
+// silently turns the first off.
 //
-// This file used to register it twice: here, for the state machine, and again
-// per track inside OnTrack, through a waitForPCClose helper. With one track
-// that only disabled the state machine. With two — audio and a camera, which is
-// the ordinary case now that phones can send video — the second track's
-// registration replaced the first track's, so the first track's cleanup was
-// waiting on a channel nothing would ever close. Its deferred
-// RemoveTrackFromRoom never ran, the track stayed in the room's map, and every
-// client that joined afterwards was forwarded a stream whose sender had left.
-// That is what "Someone" tiles for people who are gone actually were. GRYT-570.
+// Registering it per track inside OnTrack as well meant the second track's
+// registration replaced the first's, so the first track's cleanup waited on a
+// channel nothing would close, its RemoveTrackFromRoom never ran, and every
+// later client was forwarded a stream whose sender had left. That is what the
+// "Someone" tiles for people who are gone actually were (GRYT-570).
 func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, canSpeak bool) {
 	// Closed once, when the peer connection reaches a state it cannot come back
 	// from. Every track's cleanup waits on this, so they all fire rather than
@@ -320,16 +315,13 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 // isMicrophone reports whether a track arrived on the transceiver this SFU set
 // aside for microphone audio.
 //
-// CreatePeerConnection adds four recvonly transceivers in a fixed order —
-// microphone audio, camera video, screen video, screen audio — and the SFU is
-// the offerer, so it is the SFU that decides the m-line order rather than the
-// client. The first one is therefore the microphone, and matching on index is
-// matching on a decision this process made.
+// CreatePeerConnection adds four recvonly transceivers in a fixed order and the
+// SFU is the offerer, so matching on index is matching on a decision this
+// process made.
 //
-// Kind is checked as well as position. If somebody reorders the transceivers in
-// CreatePeerConnection, this stops gating rather than starts gating the camera,
-// and a `speak` denial that quietly fails open is a smaller wrong than a video
-// call that dies for reasons nobody can find.
+// **Kind is checked as well as position**, so reordering those transceivers
+// makes this stop gating rather than start gating the camera — a `speak` denial
+// that fails open is a smaller wrong than a video call that dies.
 func isMicrophone(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) bool {
 	if receiver == nil {
 		return false

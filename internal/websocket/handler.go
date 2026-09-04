@@ -43,17 +43,14 @@ var ErrPeerUnresponsive = errors.New("peer unresponsive")
 
 // closeCodePingTimeout says the SFU hung up because nothing came back.
 //
-// A private-use code (4000-4999 is reserved for exactly this) rather than one
-// of the 1000-series, because none of those means "you stopped answering".
-// 1011 is a bug on our side, 1013 already means the box is full, and 1001 is
-// the server going away. Reusing any of them would put this case in the same
-// line of the log as something it is not, which is the whole failure the close
-// frames were added to fix.
+// A private-use code rather than one of the 1000-series, none of which means
+// "you stopped answering" — 1011 is a bug on our side, 1013 means full, 1001 is
+// the server going away, and reusing one puts this case in the same log line as
+// something it is not.
 //
-// Most of the time this frame is written to a peer that is not there to read
-// it, so its real audience is the SFU's own log. When the peer is merely slow
-// rather than gone it does arrive, and the client treats anything that is not
-// a clean 1000 or 1001 as cause to reconnect — which is the right answer here.
+// Most of the time nobody is there to read the frame, so its real audience is
+// this SFU's log. When the peer is merely slow it arrives, and the client
+// treats anything but a clean 1000 or 1001 as cause to reconnect.
 const closeCodePingTimeout = 4000
 
 // isReadDeadline reports whether a read ended because the deadline armed in
@@ -496,20 +493,16 @@ func (h *Handler) handleAnswer(peerConnection *webrtc.PeerConnection, data, clie
 }
 
 // renegotiateOrDefer renegotiates now if the peer can, and otherwise says the
-// peer is still owed one. The return value is the caller's pending flag: the
-// request is only considered served once an offer has actually gone out.
+// peer is still owed one. **The request is only served once an offer has
+// actually gone out**, which is what the return value carries.
 //
-// A client that has just added a camera or screen track cannot publish it until
-// the SFU offers again, and it only asks once. Dropping the request — because
-// the peer was mid-negotiation, or because CreateOffer lost a race with the
-// room signaler — left the SFU never learning about that track, so the track
-// existed in the publisher's local preview and nowhere else. Nothing retried,
-// nothing errored, and every other participant sat on "Connecting video…"
-// indefinitely (GRYT-32).
+// A client adding a camera track cannot publish it until the SFU offers again,
+// and it only asks once — so dropping the request left the track in the
+// publisher's local preview and nowhere else, with nothing retrying and nothing
+// erroring (GRYT-32).
 //
-// Deferring is safe to leave to the next answer: the peer is only ever
-// non-stable because the SFU has an offer outstanding to it, so an answer is
-// already on its way.
+// Deferring is safe: the peer is only non-stable because the SFU has an offer
+// outstanding to it, so an answer is already on its way.
 func (h *Handler) renegotiateOrDefer(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string) (stillPending bool) {
 	if peerConnection.SignalingState() != webrtc.SignalingStateStable {
 		h.debugLog("⏳ Deferring renegotiate for %s: signaling state=%s (retried after next answer)", clientID, peerConnection.SignalingState().String())
@@ -596,15 +589,12 @@ func (h *Handler) sendErrorToConnection(conn *ThreadSafeWriter, errorMsg string)
 const stillHereMinInterval = time.Second
 
 // sendRoomJoined tells a client it is in, and what this SFU's call timeout is.
-//
 // Separate from sendSuccessToConnection, which sends the same event to the
-// *server* connection after it registers. That one is read by nothing and is
-// left as the plain string it has always been.
+// *server* connection and is read by nothing.
 //
-// A client older than this reads the JSON as an opaque string, which is what it
-// did with "Successfully joined room". A client newer than its SFU gets a
-// string that will not parse and keeps its own default. Neither needs the other
-// to move first.
+// Neither side needs the other to move first: an older client reads the JSON as
+// an opaque string, and a newer one gets a string that will not parse and keeps
+// its own default.
 func (h *Handler) sendRoomJoined(conn *ThreadSafeWriter, message string) {
 	recovery.SafeExecute("WEBSOCKET", "SEND_ROOM_JOINED", func() error {
 		payload, err := json.Marshal(types.RoomJoinedData{

@@ -1,16 +1,13 @@
 // Package auth verifies that a client connecting to the SFU was actually sent
 // here by the server that owns the room.
 //
-// Before this existed the SFU checked the server's shared password, which the
-// server handed to every browser so the browser could present it. Anyone who
-// joined a voice channel once therefore held the credential, and could open a
-// socket to the SFU directly, claim any user id, and enter any room. The
-// server's own access checks were bypassed by not asking the server.
+// The SFU used to check the server's shared password, which the server handed
+// to every browser — so anyone who joined a voice channel once could open a
+// socket directly, claim any user id and enter any room, bypassing the server's
+// access checks by not asking the server.
 //
-// A client now carries a token the server signed and the client cannot forge.
-// The key is the same shared secret the server registers with, so there is no
-// new key to distribute; what changes is that the secret stays between the two
-// services instead of travelling through the browser.
+// The token is signed with that same shared secret, so there is no new key to
+// distribute; what changes is that it stays between the two services.
 package auth
 
 import (
@@ -24,16 +21,14 @@ import (
 	"time"
 )
 
-// Token versions prefix every token so the format can change without having to
-// guess what an unprefixed string was meant to be. That foresight is now being
-// spent: v2 adds a capability list.
+// Token versions prefix every token so the format can change without guessing
+// what an unprefixed string meant. v2 adds a capability list.
 //
-// v1 is still accepted, and a v1 token means every capability. The SFU is
-// released and deployed separately from the server, so at any moment one of
-// them is older than the other. Reading a v1 token as "may not speak" would
-// mute an entire server the first time this SFU was deployed ahead of it —
-// silently, because the audio simply would not arrive. Failing open here is the
-// safe direction: the gate is a permission the server has not asked for yet.
+// **v1 is still accepted and means every capability.** The SFU and the server
+// deploy separately, so one is always older — and reading v1 as "may not speak"
+// would silently mute an entire server the first time this SFU shipped ahead of
+// it. Failing open is the safe direction: the gate is a permission the server
+// has not asked for yet.
 const (
 	TokenVersion  = "v1"
 	TokenVersion2 = "v2"
