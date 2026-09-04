@@ -188,5 +188,3 @@ func CreatePeerConnection(api *webrtc.API, config webrtc.Configuration) (*webrtc
 
 	return peerConnection, nil
 }
-
-

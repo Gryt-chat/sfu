@@ -27,9 +27,17 @@ jobs:
       # GRYT-32 was a renegotiation request dropped by a goroutine and the
       # message loop touching the same peer connection.
       - run: go test -race ./...
-      # gofmt is deliberately not checked. Four files on main do not satisfy it
-      # — internal/signaling/coordinator.go, internal/svc/forwarder.go,
-      # internal/webrtc/peer.go, internal/websocket/handler.go — mostly
-      # indentation inside a closure. Adding the gate means a formatting sweep
-      # across review-required paths for no behavioural reason, which is its own
-      # PR and its own decision. See GRYT-523.
+      # gofmt, checked rather than assumed. Four files had drifted and sat that
+      # way because nothing looked — the worst of them was a switch indented one
+      # level short inside a closure, which reads as a nesting level that is not
+      # there. The diff is printed rather than only the filenames, so a failure
+      # says what to change instead of sending somebody to run gofmt to find out.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt clean:"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi

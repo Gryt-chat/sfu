@@ -230,16 +230,16 @@ func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string
 			h.debugLog("📨 Server message from %s: event=%s", clientID, message.Event)
 
 			err = recovery.SafeExecuteWithContext("WEBSOCKET", "PROCESS_SERVER_MESSAGE", clientID, "", message.Event, func() error {
-			switch message.Event {
-			case types.EventServerRegister:
-				return h.handleServerRegistration(conn, clientID, message.Data)
-			case types.EventDisconnectUser:
-				return h.handleDisconnectUser(message.Data)
-			case types.EventUserAudioControl:
-				return h.handleUserAudioControl(message.Data)
-			case types.EventSyncRequest:
-				return h.handleSyncRequest(conn, message.Data)
-			case types.EventKeepAlive:
+				switch message.Event {
+				case types.EventServerRegister:
+					return h.handleServerRegistration(conn, clientID, message.Data)
+				case types.EventDisconnectUser:
+					return h.handleDisconnectUser(message.Data)
+				case types.EventUserAudioControl:
+					return h.handleUserAudioControl(message.Data)
+				case types.EventSyncRequest:
+					return h.handleSyncRequest(conn, message.Data)
+				case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from server %s", clientID)
 					}
