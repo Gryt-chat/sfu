@@ -376,4 +376,3 @@ func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *w
 		}
 	}
 }
-

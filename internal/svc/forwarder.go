@@ -12,7 +12,7 @@ import (
 
 // ReceiverState tracks a single downstream receiver's track and layer subscription.
 type ReceiverState struct {
-	Track           *webrtc.TrackLocalStaticRTP
+	Track            *webrtc.TrackLocalStaticRTP
 	MaxTemporalLayer int // packets with temporal_id > this are dropped
 	active           bool
 }
