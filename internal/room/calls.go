@@ -13,34 +13,22 @@ import (
 /*
 Ending a call that one person is sitting in on their own (GRYT-711).
 
-A voice channel and a call are the same thing down here — an SFU room with
-peers in it — and only one of them should be ended for being quiet.
+A voice channel and a call are the same thing down here, and **only one of them
+should be ended for being quiet**. A channel is a place, and sitting in one
+alone is ordinary. A call is an event between named people, and being the only
+one left in it means it is over.
 
-A channel is a place. Sitting in one alone is an ordinary thing to do: you are
-waiting for somebody, or you like having it open. Hanging that up would be
-wrong. A call is an event between named people, and being the only one left in
-it means it is over. What usually happens is that somebody walks off, or a tab
-stays open behind forty others, and the room, its peer connection and its
-socket stay up until the process restarts.
-
-The client ends its own call too, and says so before it does. This is the half
-that catches the clients which never will: closed laptops, wedged tabs, and
-anything modified. Those are exactly the ones leaving rooms up, so this cannot
-be left to good manners.
+The client ends its own call too. This is the half that catches the ones which
+never will — closed laptops, wedged tabs, anything modified — which are exactly
+the ones leaving rooms up.
 */
 
 // callRoomID matches the ids the server gives a conversation, and only those.
 //
-// `directConversationId` produces `dm_` and 32 hex characters;
-// `createGroupConversation` produces `dm_g` and 32 more. Both are in
-// `db/sqlite/conversations.ts`, which also points out that a prefix test can be
-// fooled — an admin may name a channel `dm_anything`.
-//
-// The server calls that cost cosmetic, because there the worst case is a
-// channel left out of a member list. Here the worst case is hanging up on
-// somebody sitting in a channel, so the whole shape is matched rather than the
-// first three characters. Naming a channel `dm_` followed by exactly 32 hex
-// digits is no longer something anybody does by accident.
+// **The whole shape, not the `dm_` prefix.** An admin may name a channel
+// `dm_anything`, and the server calls that cost cosmetic because there the
+// worst case is a channel left out of a member list — here it is hanging up on
+// somebody sitting in a channel.
 var callRoomID = regexp.MustCompile(`^dm_g?[0-9a-f]{32}$`)
 
 // IsCallRoom reports whether an SFU room is a call rather than a voice channel.
@@ -63,14 +51,11 @@ func IsCallRoom(roomID, serverID string) bool {
 // EndAbandonedCalls hangs up on calls that one person has been alone in for
 // longer than timeout. A timeout of zero switches it off.
 //
-// When the clock starts is decided here rather than by the room, and that is
-// deliberate. Every path that changes who is in a room would otherwise have to
-// remember to keep an "alone since" field honest — including the eviction of a
-// stale peer that happens in the middle of AddPeerToRoom — and the failure
-// mode of forgetting one is a call that never ends or one that ends while two
-// people are talking. Sweeping observes the state instead of trusting anybody
-// to maintain it, and the cost is that the deadline is accurate to one sweep
-// interval.
+// **Sweeping observes the state rather than trusting an "alone since" field.**
+// Every path that changes who is in a room would have to keep one honest,
+// including the stale-peer eviction inside AddPeerToRoom, and forgetting one
+// means a call that never ends or one that ends while two people are talking.
+// The cost is a deadline accurate to one sweep interval.
 func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 	if timeout <= 0 {
 		return
@@ -149,22 +134,16 @@ func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 	})
 }
 
-// StillHere restarts the alone clock for a room, and reports whether it did.
+// StillHere restarts the alone clock for a room, and reports whether it did —
+// somebody pressing "stay in the call" (GRYT-715).
 //
-// This is somebody pressing "stay in the call" (GRYT-715). GRYT-711 gave the
-// SFU a clock the client could not reach, so the client's countdown could only
-// tell you what was about to happen; there was no button, because a button
-// that did not move this clock would have been a lie.
+// **It restarts rather than granting one reprieve, and there is no cap.**
+// Somebody was at the keyboard when they pressed it, which is the entire thing
+// the sweep is trying to find out; what it exists to catch is the client that
+// never speaks.
 //
-// It restarts rather than granting one reprieve. Pressing it and then walking
-// off buys another full timeout, which is the right answer — somebody was at
-// the keyboard when they pressed it, and that is the entire thing the sweep is
-// trying to find out. There is no cap either: a call one person is deliberately
-// holding open is a call, and the person holding it is present by definition.
-// What the sweep exists to catch is the client that never speaks.
-//
-// Writing `now` rather than deleting the entry, so the clock restarts here
-// instead of on the next sweep, up to fifteen seconds later.
+// Writes `now` rather than deleting the entry, so the clock restarts here
+// instead of on the next sweep.
 func (m *Manager) StillHere(roomID string) bool {
 	moved := false
 

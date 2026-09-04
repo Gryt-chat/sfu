@@ -14,34 +14,24 @@ import (
 // indefinitely.
 const pingWriteWait = 10 * time.Second
 
-// KeepAlive pings a connection on a timer and arms a read deadline on it, so
-// that a peer which went away without saying so is noticed instead of held
-// open forever.
+// KeepAlive pings a connection on a timer and arms a read deadline on it. Two
+// problems, one mechanism:
 //
-// Two problems, one mechanism:
+//   - A peer that vanished without a FIN leaves a socket that reads forever.
+//     Nothing arrives and nothing errors, so the SFU keeps that peer in its
+//     room and in the count the capacity guardrail reads, and never runs the
+//     cleanup that would tell everybody else it left.
 //
-//   - A peer that vanished without a FIN — a closed laptop lid, LTE that
-//     dropped, a process killed behind a NAT that keeps the mapping alive —
-//     leaves a socket that reads forever. Nothing arrives and nothing errors.
-//     The SFU keeps that peer in its room, keeps it in the peer count that the
-//     capacity guardrail reads, and never runs the cleanup that would tell
-//     everybody else it left.
+//   - Nothing travels server to client while a call is quiet, so every NAT
+//     between the two eventually reaps the mapping. The peer finds out on its
+//     next write, as a reset rather than a close.
 //
-//   - Nothing at all travels server to client while a call is quiet.
-//     Signalling goes silent once the tracks are up, so every NAT and stateful
-//     firewall between the two sees an idle TCP connection and eventually
-//     reaps the mapping. The peer discovers this on its next write, which may
-//     be minutes later, and it arrives as a reset rather than as a close.
-//
-// A server-side ping answers both, and it works in a place the client's own
-// keep-alive does not. The `keep_alive` message the client sends is a JSON
-// message on a timer, and a browser throttles the timers of a backgrounded tab
-// to roughly once a minute — so the one case where the connection most needs
-// traffic is the case where the client is least able to produce it. A ping
-// frame is answered by the browser's WebSocket implementation below the JS
-// layer, on a tab that is doing nothing at all. Same for the `ws` library the
-// Gryt server uses on its own connection here, and for React Native's socket
-// on mobile. None of them needed a change for this.
+// **A server-side ping works where the client's own keep-alive cannot.** The
+// client's `keep_alive` is a JSON message on a timer, and a browser throttles a
+// backgrounded tab's timers to roughly once a minute — the case where the
+// connection most needs traffic is the one where the client can least produce
+// it. A ping frame is answered below the JS layer, and the same is true of the
+// `ws` library and React Native's socket.
 type KeepAlive struct {
 	stop chan struct{}
 }

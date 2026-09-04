@@ -195,19 +195,14 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 // ValidateClientJoin decides whether a client may enter a room, and creates the
 // room if it does not exist yet.
 //
-// The client presents a token its server signed. That token is the thing being
-// trusted; the shared server password is not, because the server used to hand
-// it to every browser and so it is not a secret from anybody who has ever been
-// in a call. See internal/auth.
+// **The token is what is trusted, not the shared server password** — the server
+// used to hand that to every browser, so it is not a secret from anybody who
+// has ever been in a call. See internal/auth.
 //
 // The password path is still accepted when no token is presented, so this build
-// can be deployed before the servers that mint tokens. It logs every time it is
-// used, and it should be removed once no server relies on it.
-//
-// Returns what the token says the bearer may do, so the caller can gate
-// publishing. A join that succeeds without a token — the deprecated password
-// path — grants every capability, because a server old enough to use it is old
-// enough not to have a `speak` permission to express.
+// can deploy ahead of the servers that mint them. **It logs every use and
+// should be removed once no server relies on it**, and it grants every
+// capability, since a server old enough to use it has no `speak` to express.
 func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken, userID string) (auth.Claims, error) {
 	claims := auth.Claims{Capabilities: []string{auth.CapSpeak}}
 	err := recovery.SafeExecuteWithContext("ROOM_MANAGER", "VALIDATE_CLIENT_JOIN", "", roomID, fmt.Sprintf("Server: %s", serverID), func() error {

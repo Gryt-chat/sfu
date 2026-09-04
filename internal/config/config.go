@@ -156,18 +156,13 @@ func Load() (*Config, error) {
 			strings.Join(iceAdvertiseIPs, ", "))
 	}
 
-	// STUN discovers the address the internet sees this host as. That is the
-	// right default when nothing else knows it, and the wrong one once an
-	// operator has said what to advertise: discovery then adds a candidate
-	// nobody chose, carrying whatever address the current egress path happens
-	// to have. If that path changes — a tunnel goes down and traffic falls back
-	// to the ordinary route — the SFU quietly starts handing out the new
-	// address instead of failing, and calls keep working, so nothing surfaces
-	// it. GRYT-768.
+	// **Forcing an address turns STUN discovery off** unless the operator says
+	// otherwise. Discovery would add a candidate nobody chose, carrying whatever
+	// address the current egress path has — and when a tunnel goes down the SFU
+	// quietly starts handing out the fallback route's address instead of
+	// failing, so nothing surfaces it (GRYT-768).
 	//
-	// So forcing an address turns discovery off unless the operator says
-	// otherwise. Setting DISABLE_STUN explicitly always wins, in either
-	// direction.
+	// Setting DISABLE_STUN explicitly always wins, in either direction.
 	disableSTUN := len(iceAdvertiseIPs) > 0
 	if raw := strings.TrimSpace(os.Getenv("DISABLE_STUN")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)

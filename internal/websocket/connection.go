@@ -33,20 +33,16 @@ type ThreadSafeWriter struct {
 	readTimeout time.Duration
 }
 
-// ReadMessage shadows the embedded gorilla method so every message that
-// arrives pushes the read deadline back out.
+// ReadMessage shadows the embedded gorilla method so every message that arrives
+// pushes the read deadline back out.
 //
-// A shadow rather than a helper with its own name, because three separate read
-// loops already call conn.ReadMessage() — the client loop, the server loop,
-// and the join handshake that runs before a connection is anything more than
-// an open socket. Threading a new name through all three leaves one of them to
-// be missed, and the one that got missed would be the one holding a goroutine
-// open with no deadline on it.
+// **A shadow rather than a new name**, because three read loops already call
+// conn.ReadMessage() and the one that got missed would be the one holding a
+// goroutine open with no deadline on it.
 //
-// Extending on any message and not only on pong is the more forgiving of the
-// two rules. A peer that is sending is alive whether or not its WebSocket
-// stack answers control frames, and the cost of being wrong in this direction
-// is hanging up on somebody who was fine.
+// Extending on any message rather than only on pong is the forgiving rule: a
+// peer that is sending is alive whether or not its stack answers control
+// frames.
 func (t *ThreadSafeWriter) ReadMessage() (int, []byte, error) {
 	messageType, payload, err := t.Conn.ReadMessage()
 	if err == nil {
@@ -79,20 +75,14 @@ func (t *ThreadSafeWriter) WriteJSON(v interface{}) error {
 
 // CloseWithReason says why before hanging up.
 //
-// `websocket.Conn.Close()` closes the TCP connection and nothing else — no
-// close frame, no status code. Every peer on the other end of one of those sees
-// exactly `code=1006 reason="(none)" wasClean=false`, which is also what a
-// snapped network cable looks like. So an SFU that only ever calls Close()
-// cannot be told apart from a broken connection by anybody, including us: a
-// client that has been rejected for capacity, dropped because its room went
-// away, or cut off by a deploy reports the same three fields as one whose Wi-Fi
-// died. That is not a small loss. It is the whole difference between "the SFU
-// dropped me" and "my network dropped", and without it the client's log cannot
-// answer which happened.
+// `websocket.Conn.Close()` closes the TCP connection and nothing else, so every
+// peer sees `code=1006 reason="(none)" wasClean=false` — which is also what a
+// snapped cable looks like. Rejected for capacity, dropped with the room, or
+// cut off by a deploy all report the same three fields as a dead Wi-Fi, and the
+// client's log cannot say which happened.
 //
-// The write is best-effort by design. If the peer is already gone the frame
-// goes nowhere and the connection still closes, which is the same outcome as
-// before this existed.
+// Best-effort by design: if the peer is gone the frame goes nowhere and the
+// connection still closes.
 func (t *ThreadSafeWriter) CloseWithReason(code int, reason string) error {
 	t.Lock()
 	defer t.Unlock()
