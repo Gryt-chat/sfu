@@ -9,9 +9,8 @@ import (
 	gorilla "github.com/gorilla/websocket"
 )
 
-// The whole point of the change these cover: a peer on the other end can tell
-// what happened. Before, every one of these was 1006 with no reason, which is
-// also what a snapped connection looks like.
+// The whole point of the change these cover: a peer can tell what happened. Before, every
+// one of these was 1006 with no reason, which is what a snapped connection looks like.
 
 func TestCloseWithReasonSendsACloseFrame(t *testing.T) {
 	server, client := newTestSocketPair(t)
@@ -44,9 +43,8 @@ func TestCloseWithReasonSendsACloseFrame(t *testing.T) {
 	}
 }
 
-// A close frame's payload is capped at 125 bytes, two of which are the status
-// code. Gorilla rejects a longer one rather than truncating it, so an
-// over-long reason would send no frame at all and land the peer back on 1006.
+// A close frame's payload is capped at 125 bytes, two of them the status code. Gorilla
+// rejects a longer one rather than truncating, so the peer would land back on 1006.
 func TestCloseWithReasonTruncatesAnOverlongReason(t *testing.T) {
 	server, client := newTestSocketPair(t)
 

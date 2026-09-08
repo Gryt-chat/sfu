@@ -8,14 +8,8 @@ import (
 	peerManager "sfu-v2/internal/webrtc"
 )
 
-// isMicrophone decides whether a `speak` denial applies to an arriving track.
-// Getting it wrong in one direction lets a denied person talk; in the other it
-// silently kills somebody's camera or their screen share's audio, which is a
-// permission they were never denied.
-//
-// The peer connection is the real one the SFU builds, not a hand-made stand-in,
-// because the thing under test is the order CreatePeerConnection adds
-// transceivers in — a stand-in that added its own would be testing the test.
+// isMicrophone decides whether a `speak` denial applies to an arriving track. The peer
+// connection is the real one, because what is under test is the transceiver order.
 func transceiverKinds(t *testing.T, pc *webrtc.PeerConnection) []webrtc.RTPCodecType {
 	t.Helper()
 	var kinds []webrtc.RTPCodecType
@@ -35,9 +29,8 @@ func newSFUPeer(t *testing.T) *webrtc.PeerConnection {
 	return pc
 }
 
-// The arrangement the gate depends on. If this fails, isMicrophone is matching
-// the wrong slot and the failure would otherwise show up as "screen share has
-// no sound" long after the change that caused it.
+// The arrangement the gate depends on. If this fails, isMicrophone is matching the wrong
+// slot, and it would otherwise show up as "screen share has no sound" much later.
 func TestTheSFUOffersMicrophoneFirst(t *testing.T) {
 	kinds := transceiverKinds(t, newSFUPeer(t))
 
@@ -65,10 +58,8 @@ func TestOnlyTheFirstAudioTransceiverIsTheMicrophone(t *testing.T) {
 		t.Fatal("the first transceiver is the microphone and was not recognised as one")
 	}
 
-	// The other three are a camera, a screen and that screen's audio. None of
-	// them is gated by `speak` — screen audio is `share_screen` on the server,
-	// and it arrives here as audio too, which is exactly the confusion this
-	// guards against.
+	// The other three are a camera, a screen and that screen's audio. None is gated by
+	// `speak` — screen audio is `share_screen`, and it arrives here as audio too.
 	for i, tr := range transceivers[1:] {
 		if isMicrophone(pc, tr.Receiver()) {
 			t.Fatalf("transceiver %d (%v) was treated as the microphone", i+1, tr.Kind())
@@ -76,9 +67,8 @@ func TestOnlyTheFirstAudioTransceiverIsTheMicrophone(t *testing.T) {
 	}
 }
 
-// A receiver belonging to some other peer connection is not this one's
-// microphone. Fails closed the safe way: unrecognised means "not the mic", so
-// the track is forwarded rather than dropped.
+// A receiver belonging to some other peer connection is not this one's microphone. Fails
+// closed the safe way: unrecognised means "not the mic", so the track is forwarded.
 func TestAnUnknownReceiverIsNotTheMicrophone(t *testing.T) {
 	if isMicrophone(newSFUPeer(t), newSFUPeer(t).GetTransceivers()[0].Receiver()) {
 		t.Fatal("a receiver from another peer connection was treated as the microphone")

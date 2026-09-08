@@ -10,12 +10,8 @@ import (
 )
 
 /*
-What a client is told when it joins (GRYT-715).
-
-The client draws a countdown before a call it is alone in ends, and until this
-message carried a number it had its own copy of the SFU's default. That copy
-was right until an operator changed theirs. These check the number crosses the
-wire and survives the units.
+What a client is told when it joins (GRYT-715). The client drew a countdown from its own copy
+of the SFU's default, which was right until an operator changed theirs.
 */
 
 func TestRoomJoinedCarriesTheCallAloneTimeout(t *testing.T) {
@@ -59,9 +55,8 @@ func TestRoomJoinedSaysZeroWhenTheSweepIsOff(t *testing.T) {
 	if err := json.Unmarshal([]byte(message.Data), &joined); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// The disagreement that matters. An operator who turns the sweep off and
-	// gets a client still hanging up after two minutes has a call ending for
-	// no reason anybody can see.
+	// The disagreement that matters. An operator who turns the sweep off and gets a client
+	// still hanging up after two minutes has a call ending for no visible reason.
 	if joined.CallAloneTimeoutSeconds != 0 {
 		t.Fatalf("SFU_CALL_ALONE_TIMEOUT=0 has to reach the client as 0, got %d", joined.CallAloneTimeoutSeconds)
 	}

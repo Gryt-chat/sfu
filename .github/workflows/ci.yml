@@ -19,6 +19,14 @@ jobs:
       # Nothing checked a pull request at all before this; the only compile check was inside
       # a workflow_dispatch release. ./... because a package no binary imports must compile.
       - run: go build ./...
+
+      # No comment runs past two lines. The script carries the list of paths still
+      # to be swept, and that list only ever shrinks.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/check-comment-length.mjs
+
       - run: go vet ./...
       # These tests existed and had never run anywhere but a developer's machine. -race
       # because every bug this package has had is a race, GRYT-32 included.

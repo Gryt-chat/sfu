@@ -11,9 +11,8 @@ import (
 	gorilla "github.com/gorilla/websocket"
 )
 
-// What these cover: before this, a socket whose other end had gone away without
-// a FIN read forever, and nothing at all travelled server to client while a
-// call was quiet.
+// What these cover: before this, a socket whose other end had gone without a FIN read
+// forever, and nothing travelled server to client while a call was quiet.
 
 func TestKeepAlivePingsAQuietConnection(t *testing.T) {
 	server, client := newTestSocketPair(t)
@@ -30,10 +29,8 @@ func TestKeepAlivePingsAQuietConnection(t *testing.T) {
 	k := StartKeepAlive(server, 50*time.Millisecond, 5*time.Second)
 	defer k.Stop()
 
-	// Control frames are only surfaced while a read is in progress, so the
-	// client has to be reading for its ping handler to run at all. This read
-	// never completes — nothing sends it a message — which is exactly the quiet
-	// connection being tested.
+	// Control frames are only surfaced while a read is in progress, so the client has to be
+	// reading for its ping handler to run. This read never completes, which is the case.
 	go func() {
 		_, _, _ = client.ReadMessage()
 	}()
@@ -48,9 +45,8 @@ func TestKeepAlivePingsAQuietConnection(t *testing.T) {
 func TestReadDeadlineFiresWhenNothingComesBack(t *testing.T) {
 	server, client := newTestSocketPair(t)
 
-	// A peer that is there but does not answer. Gorilla's default ping handler
-	// replies with a pong, so it has to be replaced to get the case worth
-	// testing: a socket that is open and silent.
+	// A peer that is there but does not answer. Gorilla's default ping handler replies with
+	// a pong, so it has to be replaced to get a socket that is open and silent.
 	client.SetPingHandler(func(string) error { return nil })
 
 	k := StartKeepAlive(server, 50*time.Millisecond, 200*time.Millisecond)

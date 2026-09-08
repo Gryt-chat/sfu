@@ -45,11 +45,8 @@ func (m *Manager) debugLog(format string, args ...interface{}) {
 	}
 }
 
-// AddTrackToRoom adds a new media track to a specific room, storing the sender's
-// peer connection and remote SSRC so RTCP can be relayed back.
-// It creates a LayerForwarder that handles per-receiver fanout with optional
-// SVC temporal layer filtering. The returned TrackLocalStaticRTP is a legacy
-// fallback — callers should prefer GetForwarder for SVC-aware forwarding.
+// AddTrackToRoom adds a media track to a room, storing the sender's peer connection and SSRC
+// so RTCP can be relayed. The returned TrackLocalStaticRTP is a legacy fallback.
 func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC *webrtc.PeerConnection) *webrtc.TrackLocalStaticRTP {
 	m.mu.Lock()
 	defer m.mu.Unlock()

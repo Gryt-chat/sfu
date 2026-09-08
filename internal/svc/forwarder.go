@@ -17,11 +17,8 @@ type ReceiverState struct {
 	active           bool
 }
 
-// LayerForwarder reads RTP packets from a remote track, parses the Dependency
-// Descriptor header extension (if present), and selectively forwards packets
-// to per-receiver local tracks based on each receiver's subscribed temporal layer.
-//
-// For streams without SVC (no DD extension), it falls back to blind relay.
+// LayerForwarder reads RTP from a remote track, parses the Dependency Descriptor, and
+// forwards per receiver by subscribed temporal layer. Without a DD it blindly relays.
 type LayerForwarder struct {
 	mu sync.RWMutex
 
@@ -43,9 +40,8 @@ type LayerForwarder struct {
 	debug   bool
 }
 
-// NewLayerForwarder creates a forwarder for the given remote track and starts
-// the forwarding goroutine. The goroutine runs until the remote track ends or
-// Stop is called.
+// NewLayerForwarder creates a forwarder for the given remote track and starts its goroutine,
+// which runs until the remote track ends or Stop is called.
 func NewLayerForwarder(remote *webrtc.TrackRemote, senderPC *webrtc.PeerConnection, debug bool) *LayerForwarder {
 	lf := &LayerForwarder{
 		remoteTrack: remote,
