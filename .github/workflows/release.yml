@@ -85,16 +85,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Read the current version from the tags rather than a committed file.
-          #
-          # There used to be a VERSION file, and keeping it up to date meant this
-          # step had to commit and push — to a branch that is protected, because
-          # this is a review-required path. So the release could not run at all.
-          # The file was never used for anything either: it is in .dockerignore,
-          # so it never reached the build, and the version gets into the binary
-          # through --build-arg below. It only ever duplicated the tag.
-          #
-          # fetch-depth: 0 on the checkout above is what makes the tags available.
+          # Read the version from the tags rather than a committed file: a VERSION file meant
+          # pushing to a protected branch. fetch-depth: 0 above is what makes tags available.
           CURRENT_VERSION="$(git tag --list 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')"
 
           if [[ -z "$CURRENT_VERSION" ]]; then
@@ -168,9 +160,8 @@ jobs:
             exit 1
           fi
 
-          # Tag only. Nothing is committed, so nothing is pushed to main, so this
-          # works against a protected branch. The tag names the commit that was
-          # dispatched, which is what the release is built from anyway.
+          # Tag only. Nothing is committed, so nothing is pushed to main and this works
+          # against a protected branch. The tag names the dispatched commit.
           git tag "v$NEW_VERSION"
           git push origin "v$NEW_VERSION"
 
