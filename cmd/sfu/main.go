@@ -122,9 +122,8 @@ func main() {
 		log.Fatalf("❌ Failed to initialize WebRTC API: %v", err)
 	}
 
-	// Verify UDP connectivity before reporting healthy. This gates the
-	// /health endpoint so Docker Compose waits for the networking stack to
-	// be fully operational before starting dependent services.
+	// Verify UDP connectivity before reporting healthy. This gates /health so Compose waits
+	// for the networking stack before starting dependent services.
 	readiness.VerifyUDP(cfg.STUNServers, cfg.DisableSTUN)
 
 	// Initialize room manager with recovery
@@ -182,10 +181,8 @@ func main() {
 		}
 	})
 
-	// Ending calls somebody is sitting in alone. Its own routine rather than a
-	// second job inside the cleanup above, because that one runs every five
-	// minutes against a thirty-minute threshold and this one has to notice
-	// inside a couple of minutes.
+	// Ending calls somebody is sitting in alone. Its own routine because the cleanup above
+	// runs every five minutes against a thirty-minute threshold, and this has minutes.
 	if cfg.CallAloneTimeout > 0 {
 		recovery.SafeGoroutine("MAIN", "CALL_SWEEP", func() {
 			ticker := time.NewTicker(config.DefaultCallSweepInterval)
@@ -218,16 +215,8 @@ func main() {
 		fmt.Fprintf(w, `{"status":"healthy","service":"sfu","version":"%s","timestamp":"%s"}`, Version, ts)
 	})
 
-	// Metrics get a listener of their own, not the one the world talks to. On
-	// the default mux, /metrics sat beside the signalling WebSocket and
-	// published the full Prometheus register to anybody behind a proxy.
-	//
-	// A separate port rather than a token, since a token is only safe for people
-	// who set one and the monitoring stack is opt-in.
-	//
-	// **Publishing this port, or running with host networking, puts it back on
-	// the public internet.** Prometheus reaches it as `sfu:<port>` over the
-	// Compose network and needs no published port.
+	// Metrics get a listener of their own: on the default mux, /metrics sat beside the
+	// signalling WebSocket. Publishing this port puts the full register back on the internet.
 	if cfg.MetricsPort > 0 {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
@@ -289,8 +278,7 @@ func main() {
 
 	// Start the HTTP server with recovery
 	log.Printf("🌐 Starting HTTP server on port %s", cfg.Port)
-	// A wildcard bind, unlike the UDP mux above, so this is every address the
-	// host has rather than a list of sockets that were opened one by one. The
+	// A wildcard bind, unlike the UDP mux above, so this is every address the host has. The
 	// two can disagree, and when they do it is worth being able to see it.
 	hostV4, hostV6 := hostAddresses(cfg.Port)
 	logBoundAddresses("🌐 Signalling reachable on", hostV4, hostV6)
@@ -305,13 +293,8 @@ func main() {
 	}
 }
 
-// logBoundAddresses says where a listener answers, in the form somebody
-// checking their router or firewall can scan.
-//
-// IPv4 in full, IPv6 as a count. A host has a handful of IPv4 addresses and
-// can easily have thirty IPv6 ones, nearly all link-local, and printing them
-// all buries the two or three anybody is looking for. The count still says
-// IPv6 is bound, which is the only thing the list was telling you.
+// logBoundAddresses says where a listener answers. IPv4 in full, IPv6 as a count: a host can
+// have thirty IPv6 addresses, and printing them buries the two anybody is looking for.
 func logBoundAddresses(label string, v4 []string, v6Count int) {
 	if len(v4) == 0 && v6Count == 0 {
 		log.Printf("%s: nothing. No usable interface was found.", label)
@@ -333,9 +316,8 @@ func logBoundAddresses(label string, v4 []string, v6Count int) {
 	log.Printf("%s: %s%s", label, strings.Join(v4, ", "), suffix)
 }
 
-// interfaceNames maps an IP to the interface it sits on, so an address can say
-// which adapter it came from. Best effort: an address with no match is printed
-// without one rather than held back.
+// interfaceNames maps an IP to the interface it sits on. Best effort: an address with no
+// match is printed without one rather than held back.
 func interfaceNames() map[string]string {
 	names := map[string]string{}
 
@@ -381,9 +363,8 @@ func muxAddresses(mux ice.UDPMux, port string) ([]string, int) {
 	return v4, v6
 }
 
-// hostAddresses lists the addresses a wildcard listener on this port answers
-// on. Loopback is included deliberately: "127.0.0.1 and nothing else" is a
-// real and diagnosable state, and hiding it would hide the diagnosis.
+// hostAddresses lists the addresses a wildcard listener on this port answers on. Loopback is
+// included deliberately: "127.0.0.1 and nothing else" is a real and diagnosable state.
 func hostAddresses(port string) ([]string, int) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -431,19 +412,13 @@ func describe(ip net.IP, port string, names map[string]string) string {
 	return fmt.Sprintf("%s:%s", ip, port)
 }
 
-// newSettingEngine builds the ICE half of the WebRTC API from the config.
-//
-// Extracted from main so a test can build the same engine and gather against
-// it. What this configures is the one thing nobody was watching: the original
-// address leak in GRYT-768 survived for weeks because voice kept working, and
-// a wrong answer here looks exactly like a right one until somebody reads an
-// SDP.
+// newSettingEngine builds the ICE half of the WebRTC API from the config. Extracted so a
+// test can gather against it: a wrong answer here looks right until somebody reads an SDP.
 func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
 	se := pion.SettingEngine{}
 
-	// All ICE traffic flows over one UDP port. A single port is far easier
-	// to get through a firewall than a range, and networks that drop UDP on
-	// high ports let it through when it is a port they recognise.
+	// All ICE traffic flows over one UDP port: far easier through a firewall than a range,
+	// and networks that drop UDP on high ports let a recognised one through.
 	udpMux, muxErr := ice.NewMultiUDPMuxFromPort(
 		cfg.ICEUDPMuxPort,
 		ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress),
@@ -453,12 +428,8 @@ func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
 	}
 	se.SetICEUDPMux(udpMux)
 	log.Printf("🧊 ICE UDP mux on port: %d", cfg.ICEUDPMuxPort)
-	// Where, not just which port. The mux binds one socket per interface
-	// address rather than a wildcard, so an address that is missing here is
-	// an address media cannot arrive on, whatever the firewall says. That
-	// is invisible otherwise: a VPN adapter that came up after the process,
-	// or an interface that was down at startup, both look like a working
-	// SFU right up until somebody tries to reach it that way. GRYT-482.
+	// Where, not just which port. The mux binds one socket per interface address, so an
+	// address missing here is one media cannot arrive on, whatever the firewall says (GRYT-482).
 	muxV4, muxV6 := muxAddresses(udpMux, strconv.Itoa(cfg.ICEUDPMuxPort))
 	logBoundAddresses("🧊 ICE UDP mux bound on", muxV4, muxV6)
 
