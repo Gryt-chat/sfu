@@ -1,13 +1,5 @@
-// Package auth verifies that a client connecting to the SFU was actually sent
-// here by the server that owns the room.
-//
-// The SFU used to check the server's shared password, which the server handed
-// to every browser — so anyone who joined a voice channel once could open a
-// socket directly, claim any user id and enter any room, bypassing the server's
-// access checks by not asking the server.
-//
-// The token is signed with that same shared secret, so there is no new key to
-// distribute; what changes is that it stays between the two services.
+// Package auth verifies that a client connecting to the SFU was sent here by the server that
+// owns the room. The shared password reached every browser, so it was never a secret.
 package auth
 
 import (

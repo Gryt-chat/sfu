@@ -46,9 +46,8 @@ type Manager struct {
 	serverToRooms     map[string][]string
 	registeredServers map[string]string     // serverID -> serverPassword
 	serverConns       map[string]JSONWriter // serverID -> server WebSocket connection
-	// When a call room was first seen holding one person and nobody else. Kept
-	// by the sweep in calls.go rather than by the paths that add and remove
-	// peers — see EndAbandonedCalls for why. Guarded by mutex.
+	// When a call room was first seen holding one person. Kept by the sweep in calls.go
+	// rather than by the paths that add and remove peers. Guarded by mutex.
 	aloneSince map[string]time.Time
 	mutex      sync.RWMutex
 	debug      bool
@@ -127,15 +126,8 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 
 		m.debugLog("Attempting to register server '%s' with room '%s'", serverID, roomID)
 
-		// An empty secret is not a secret. It is the HMAC key client tokens are
-		// verified against, so registering with "" means anybody who knows a room
-		// id and a user id can mint a token this SFU accepts and walk into the
-		// room as that user. Measured, not assumed: see GRYT-786.
-		//
-		// The server side no longer sends one, generating and keeping a key
-		// instead. This refuses it here as well, because an SFU is reachable by
-		// whatever connects to it and should not depend on every server that
-		// does being a current build.
+		// An empty secret is not a secret: it is the HMAC key client tokens are verified
+		// against, so "" lets anybody mint a token this SFU accepts (GRYT-786).
 		if serverPassword == "" {
 			log.Printf("❌ Refusing to register server %s with an empty secret. Upgrade the server; it generates one now (GRYT-786)", serverID)
 			return fmt.Errorf("server %s registered with an empty secret", serverID)
@@ -145,13 +137,8 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 		if existingPassword, exists := m.registeredServers[serverID]; exists {
 			if existingPassword != serverPassword {
 				m.debugLog("❌ Server '%s' registration failed: password mismatch", serverID)
-				// Worth saying what to do about it. This SFU remembers what a
-				// server registered under its id for as long as the process
-				// lives, and nothing removes it, so a server that legitimately
-				// changed its key cannot get back in until this restarts. That
-				// is exactly what upgrading past GRYT-786 looks like, and the
-				// old message left somebody staring at a server that had done
-				// nothing wrong.
+				// Worth saying what to do about it: this SFU remembers a server's key for
+				// the life of the process, so a rotated key needs a restart.
 				return fmt.Errorf("server %s is already registered with a different secret; if its key changed, restart this SFU so it forgets the old one", serverID)
 			}
 			m.debugLog("✅ Server '%s' already registered with matching password", serverID)
@@ -192,17 +179,8 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 	})
 }
 
-// ValidateClientJoin decides whether a client may enter a room, and creates the
-// room if it does not exist yet.
-//
-// **The token is what is trusted, not the shared server password** — the server
-// used to hand that to every browser, so it is not a secret from anybody who
-// has ever been in a call. See internal/auth.
-//
-// The password path is still accepted when no token is presented, so this build
-// can deploy ahead of the servers that mint them. **It logs every use and
-// should be removed once no server relies on it**, and it grants every
-// capability, since a server old enough to use it has no `speak` to express.
+// ValidateClientJoin decides whether a client may enter a room, creating it if needed. The
+// token is trusted, not the shared password; the password path is deprecated and logged.
 func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken, userID string) (auth.Claims, error) {
 	claims := auth.Claims{Capabilities: []string{auth.CapSpeak}}
 	err := recovery.SafeExecuteWithContext("ROOM_MANAGER", "VALIDATE_CLIENT_JOIN", "", roomID, fmt.Sprintf("Server: %s", serverID), func() error {
@@ -218,11 +196,8 @@ func (m *Manager) ValidateClientJoin(roomID, serverID, serverPassword, userToken
 			return fmt.Errorf("server %s not registered", serverID)
 		}
 
-		// Belt as well as braces. Registration refuses an empty secret above, so
-		// this should be unreachable; it is here because the cost of being wrong
-		// about that is every room on this server standing open. Both the token
-		// path and the deprecated password path below verify against this value,
-		// and both of them accept anything when it is "".
+		// Belt as well as braces. Registration refuses an empty secret above, so this should
+		// be unreachable; being wrong means every room on this server stands open.
 		if registeredPassword == "" {
 			m.debugLog("❌ Validation failed: server '%s' has an empty secret", serverID)
 			return fmt.Errorf("server %s has an empty secret", serverID)
@@ -309,9 +284,8 @@ func (m *Manager) GetRoom(roomID string) (*Room, bool) {
 	return room, exists
 }
 
-// AddPeerToRoom adds a peer connection to a room and notifies the owning server.
-// If the same userID already has a connection in the room (e.g. stale connection
-// after a page refresh), the old connection is evicted first.
+// AddPeerToRoom adds a peer connection to a room and notifies the owning server. If the same
+// userID already has a connection there, the old one is evicted first.
 func (m *Manager) AddPeerToRoom(roomID, clientID, userID string, pc *webrtc.PeerConnection, conn JSONWriter) error {
 	var serverID string
 	var evictedPC *webrtc.PeerConnection
@@ -372,9 +346,8 @@ func (m *Manager) AddPeerToRoom(roomID, clientID, userID string, pc *webrtc.Peer
 		})
 	})
 
-	// Close evicted resources outside locks to avoid deadlocks with
-	// OnConnectionStateChange callbacks. The old handler goroutine's defers
-	// will also attempt cleanup but find the peer already removed — that's safe.
+	// Close evicted resources outside locks, to avoid deadlocks with
+	// OnConnectionStateChange. The old goroutine's defers find the peer already removed.
 	if evictedConn != nil {
 		if closer, ok := evictedConn.(io.Closer); ok {
 			go closer.Close()

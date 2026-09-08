@@ -68,9 +68,8 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 		h.debugLog("✅ Client %s validated for room '%s'", clientID, joinData.RoomID)
 
-		// Capacity guardrail on what this machine should carry, not on ports:
-		// one muxed UDP port takes far more peers than a host has CPU and
-		// upload bandwidth for. Unset, MaxPeers is config.DefaultMaxPeers.
+		// Capacity guardrail on what this machine should carry, not on ports: one muxed UDP
+		// port takes far more peers than a host has CPU and upload for.
 		if h.config.MaxPeers > 0 {
 			currentPeers := h.roomManager.TotalPeers()
 			if currentPeers >= h.config.MaxPeers {
@@ -160,21 +159,11 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 	})
 }
 
-// setupWebRTCHandlers sets up WebRTC event handlers with crash protection.
-//
-// **Exactly one OnConnectionStateChange registration.** pion's is
-// `handler.Store(f)`, which replaces rather than adds, so a second one anywhere
-// silently turns the first off.
-//
-// Registering it per track inside OnTrack as well meant the second track's
-// registration replaced the first's, so the first track's cleanup waited on a
-// channel nothing would close, its RemoveTrackFromRoom never ran, and every
-// later client was forwarded a stream whose sender had left. That is what the
-// "Someone" tiles for people who are gone actually were (GRYT-570).
+// setupWebRTCHandlers sets up WebRTC event handlers with crash protection. Exactly one
+// OnConnectionStateChange registration: pion's Store replaces, so a second turns the first off.
 func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, canSpeak bool) {
-	// Closed once, when the peer connection reaches a state it cannot come back
-	// from. Every track's cleanup waits on this, so they all fire rather than
-	// only the one that happened to register last.
+	// Closed once, when the peer connection reaches a state it cannot come back from. Every
+	// track's cleanup waits on this, so they all fire rather than only the last registered.
 	closed := make(chan struct{})
 	var closeOnce sync.Once
 	markClosed := func() {
@@ -191,14 +180,8 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			h.debugLog("🔧 ICE candidate for %s: type=%s protocol=%s address=%s:%d",
 				clientID, i.Typ.String(), i.Protocol.String(), i.Address, i.Port)
 
-			/* Checked on the way out, not only rewritten on the way in.
-			 *
-			 * The rewrite rule covers host candidates and STUN is off by
-			 * default when ICE_ADVERTISE_IP is set, so in the shipped
-			 * configuration this never fires. It fires for an operator who
-			 * turns STUN back on, which is the configuration GRYT-768 leaked a
-			 * private address from — and it will fire for whatever gathers a
-			 * candidate next, which is the part worth having. */
+			/* Checked on the way out, not only rewritten on the way in. It never fires in the
+			 * shipped configuration; it fires for an operator who turns STUN back on. */
 			if !iceguard.Allowed(i.Address, h.config.ICEAdvertiseIPs) {
 				log.Printf("🧊 Dropping ICE candidate for %s: address %s is not in ICE_ADVERTISE_IP (type=%s)",
 					clientID, i.Address, i.Typ.String())
@@ -248,32 +231,20 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 		})
 	})
 
-	// Already gone by the time the handler was attached, which pion will not
-	// call back about. Rare, and the cost of missing it is a track that is
-	// never cleaned up — the exact bug this function is fixing.
+	// Already gone by the time the handler was attached, which pion will not call back
+	// about. Rare, and the cost of missing it is the exact bug this function fixes.
 	if st := peerConnection.ConnectionState(); st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateFailed {
 		markClosed()
 	}
 
-	// Handle incoming tracks with recovery.
-	// The LayerForwarder (created inside AddTrackToRoom) handles all RTP
-	// forwarding including SVC layer filtering, so we no longer need a
-	// separate forwardRTPPackets goroutine. We block here until the remote
-	// track ends so the deferred cleanup fires at the right time.
+	// The LayerForwarder created inside AddTrackToRoom does all RTP forwarding, so there is
+	// no separate goroutine. This blocks until the remote track ends, so cleanup fires then.
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
 
-			// Denied `speak` on this channel: drop the microphone on the floor
-			// rather than forwarding it. This is the only place the gate can be
-			// real. The client decides whether to send, and a client is the
-			// thing being restricted — anybody can run one that publishes
-			// anyway, so a check there is decoration.
-			//
-			// Returning before AddTrackToRoom means no local track, no
-			// forwarder and no subscriber ever sees it. The peer connection
-			// stays up and everything else about the call keeps working: this
-			// is somebody who may listen, not somebody being thrown out.
+			// Denied `speak` on this channel: drop the microphone rather than forward it.
+			// This is the only place the gate can be real — a client check is decoration.
 			if !canSpeak && isMicrophone(peerConnection, receiver) {
 				h.debugLog("🔇 Refusing microphone from %s in room '%s': token does not grant %q", clientID, roomID, auth.CapSpeak)
 				metrics.TracksRefused.Inc()
@@ -299,29 +270,16 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			metrics.TracksActive.Inc()
 			h.coordinator.OnTrackAddedToRoom(roomID)
 
-			// Block until the peer connection closes. The LayerForwarder
-			// goroutine reads from the remote track; when the PC closes
-			// the track read will error out and the forwarder stops. We
-			// wait here so the deferred cleanup runs at the correct time.
-			//
-			// On the shared channel rather than a registration of its own —
-			// see the note on this function.
+			// Block until the peer connection closes, so the deferred cleanup runs at the
+			// right time. On the shared channel — see the note on this function.
 			<-closed
 			return nil
 		})
 	})
 }
 
-// isMicrophone reports whether a track arrived on the transceiver this SFU set
-// aside for microphone audio.
-//
-// CreatePeerConnection adds four recvonly transceivers in a fixed order and the
-// SFU is the offerer, so matching on index is matching on a decision this
-// process made.
-//
-// **Kind is checked as well as position**, so reordering those transceivers
-// makes this stop gating rather than start gating the camera — a `speak` denial
-// that fails open is a smaller wrong than a video call that dies.
+// isMicrophone reports whether a track arrived on the transceiver set aside for microphone
+// audio. Kind is checked as well as position, so reordering stops the gate rather than moves it.
 func isMicrophone(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) bool {
 	if receiver == nil {
 		return false
