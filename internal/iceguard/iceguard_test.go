@@ -39,9 +39,8 @@ func TestAllowed(t *testing.T) {
 			want:      false,
 		},
 		{
-			// A private address is the shape GRYT-768 leaked, and it gets no
-			// special treatment — it is refused for being unnamed, not for
-			// being private.
+			// A private address is the shape GRYT-768 leaked, and it gets no special
+			// treatment — it is refused for being unnamed, not for being private.
 			name:      "a private address is refused when a list is set",
 			address:   "192.168.50.147",
 			advertise: advertise,

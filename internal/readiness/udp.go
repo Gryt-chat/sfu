@@ -14,17 +14,8 @@ var udpVerified atomic.Bool
 // IsUDPReady reports whether the outbound UDP connectivity check has passed.
 func IsUDPReady() bool { return udpVerified.Load() }
 
-// VerifyUDP sends STUN Binding Requests to the configured STUN servers in a
-// background goroutine. The health endpoint should gate on IsUDPReady() so
-// Docker does not mark the SFU as healthy before the container's networking
-// stack is fully operational.
-//
-// This primarily mitigates a race condition on Docker Desktop (Windows/macOS)
-// where UDP port-forwarding rules can lag behind container process startup,
-// causing ICE failures on the very first docker compose up.
-//
-// When STUN is disabled or no servers are configured the flag is set
-// immediately.
+// VerifyUDP sends STUN Binding Requests in the background so /health can gate on
+// IsUDPReady(): Docker Desktop's UDP forwarding can lag the container process.
 func VerifyUDP(stunServers []string, disableSTUN bool) {
 	if disableSTUN || len(stunServers) == 0 {
 		log.Printf("🧊 UDP readiness: STUN disabled or no servers configured — ready immediately")
@@ -74,11 +65,8 @@ func sendSTUNBinding(serverAddr string) bool {
 		return false
 	}
 
-	// STUN Binding Request (20 bytes):
-	//   Type  = 0x0001  (Binding Request)
-	//   Len   = 0x0000  (no attributes)
-	//   Cookie = 0x2112A442
-	//   TxID  = 12 random bytes
+	// STUN Binding Request, 20 bytes: type 0x0001, length 0x0000, cookie 0x2112A442,
+	// and twelve random transaction bytes.
 	var req [20]byte
 	req[0], req[1] = 0x00, 0x01
 	req[4], req[5], req[6], req[7] = 0x21, 0x12, 0xA4, 0x42

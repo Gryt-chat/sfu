@@ -32,9 +32,8 @@ func TestAnotherSecretDoesNotVerify(t *testing.T) {
 	}
 }
 
-// A token is a statement about one user in one room. Without this check the
-// signature alone would let anybody with a valid token of their own walk into
-// any room, which is the hole this replaces rather than a new one.
+// A token is a statement about one user in one room. Without this check the signature alone
+// would let anybody with a valid token walk into any room.
 func TestATokenForAnotherRoomIsRefused(t *testing.T) {
 	if _, err := Verify(secret, validToken(t), "some-other-room", user, time.Now()); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("verify = %v, want ErrMismatch", err)
@@ -90,10 +89,8 @@ func TestAnEmptySecretIsNotAMasterKey(t *testing.T) {
 
 // ── Capabilities (v2) ────────────────────────────────────────────────
 
-// The compatibility case, and the one worth having a test for: this SFU is
-// released separately from the server, so it will run against servers that
-// still mint v1. Reading those as "no capabilities" would mute every one of
-// them, and it would do it silently — the audio simply would not arrive.
+// The compatibility case: this SFU is released separately from the server, so it will run
+// against servers still minting v1. Reading those as "no capabilities" would mute them.
 func TestAV1TokenMaySpeak(t *testing.T) {
 	claims, err := Verify(secret, validToken(t), room, user, time.Now())
 	if err != nil {
@@ -159,12 +156,8 @@ func TestAVersionMustMatchItsFieldCount(t *testing.T) {
 }
 
 // ── The vectors the server pins too ──────────────────────────────────
-//
-// `src/sfu/clientToken.test.ts` in the server asserts these exact strings. The
-// server signs and this verifies, so the two implementations agreeing byte for
-// byte is the whole contract — and until now only one side pinned it, while a
-// comment there claimed both did. A drift in either would have shown up as
-// voice failing in production rather than as a test.
+// `src/sfu/clientToken.test.ts` asserts these exact strings. The server signs and this
+// verifies, so the two agreeing byte for byte is the whole contract.
 
 const (
 	vectorSecret = "shared-server-secret"

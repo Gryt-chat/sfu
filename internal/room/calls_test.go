@@ -10,13 +10,8 @@ import (
 )
 
 /*
-Ending a call somebody is alone in, and not ending anything else (GRYT-711).
-
-Two things have to be true at once and they pull against each other. A call
-with one person left in it is over and should be hung up. A voice channel with
-one person in it is somebody waiting for a friend, and hanging that up is a bug
-people would feel immediately. Both are the same kind of SFU room, so the only
-thing separating them is the id.
+Ending a call somebody is alone in, and not ending anything else (GRYT-711). Both are the
+same kind of SFU room, so the only thing separating them is the id.
 */
 
 // A connection that records being closed. The real one is a WebSocket; what
@@ -43,9 +38,8 @@ func (c *fakeConn) isClosed() bool {
 
 const testServerID = "gryt-test"
 
-// addRoom puts a room in the manager holding one connection per client id.
-// The peer connections are nil, which nothing on this path dereferences —
-// EndAbandonedCalls counts them and closes the WebSocket beside them.
+// addRoom puts a room in the manager holding one connection per client id. The peer
+// connections are nil, which nothing on this path dereferences.
 func addRoom(m *Manager, channelID string, clients ...string) (string, map[string]*fakeConn) {
 	roomID := testServerID + "_" + channelID
 	conns := map[string]*fakeConn{}
@@ -77,9 +71,8 @@ func addRoom(m *Manager, channelID string, clients ...string) (string, map[strin
 
 const testTimeout = time.Minute
 
-// rewind moves every clock the sweep has started back past the deadline, which
-// is how these run in milliseconds rather than in minutes. A negative timeout
-// would not do: that is the off switch.
+// rewind moves every clock the sweep has started back past the deadline, which is how these
+// run in milliseconds. A negative timeout would not do: that is the off switch.
 func rewind(m *Manager) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -95,10 +88,8 @@ func sweepPastTheDeadline(m *Manager) {
 	m.EndAbandonedCalls(testTimeout)
 }
 
-// The close runs in a goroutine, so "was not closed" is only true after
-// giving one a chance to run. Without this the negative cases pass against a
-// sweep that is closing the connection a microsecond later — checked, by
-// making IsCallRoom answer true for everything and watching them still pass.
+// The close runs in a goroutine, so "was not closed" is only true after giving one a chance.
+// Checked by making IsCallRoom answer true for everything and watching them still pass.
 func settle() {
 	time.Sleep(50 * time.Millisecond)
 }
@@ -272,11 +263,8 @@ func TestForgetsARoomThatWentAway(t *testing.T) {
 }
 
 /*
-Saying you are still here (GRYT-715).
-
-The sweep above is the half that catches a client which never speaks. This is
-the half for the one that does: somebody watching the countdown, pressing the
-button, and expecting the call to still be there afterwards.
+Saying you are still here (GRYT-715). The sweep above catches a client that never speaks;
+this is the half for one that does, and expects the call to still be there.
 */
 
 func TestStillHereKeepsTheCallUp(t *testing.T) {

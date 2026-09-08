@@ -8,10 +8,8 @@ import (
 	"sfu-v2/internal/auth"
 )
 
-// GRYT-786. SERVER_PASSWORD defaulted to empty, and it is the HMAC key client
-// tokens are verified against, so an ordinary deployment verified against a key
-// anybody can guess. These pin the refusal from this side, so an old or
-// misconfigured server cannot reopen it.
+// GRYT-786. SERVER_PASSWORD defaulted to empty and is the HMAC key tokens are verified
+// against, so an ordinary deployment verified against a key anybody can guess.
 func TestRegisterServerRefusesAnEmptySecret(t *testing.T) {
 	m := NewManager(false)
 
@@ -58,9 +56,8 @@ func TestARealSecretStillWorks(t *testing.T) {
 }
 
 func TestAChangedSecretSaysToRestartTheSFU(t *testing.T) {
-	// The message matters more than it looks. Nothing removes a registration,
-	// so a server that legitimately rotated its key cannot get back in until
-	// this process restarts, and upgrading past GRYT-786 is exactly that case.
+	// The message matters more than it looks. Nothing removes a registration, so a server
+	// that rotated its key cannot get back in until this process restarts.
 	m := NewManager(false)
 	_ = m.RegisterServer("srv-1", "first-secret", "room-42")
 

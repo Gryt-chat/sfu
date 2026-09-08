@@ -330,14 +330,8 @@ func (c *Coordinator) OnTrackRemovedFromRoom(roomID string) {
 	})
 }
 
-// relayReceiverRTCP reads RTCP from a receiver's RTPSender and relays PLI/FIR
-// back to the original sender's peer connection so it can generate keyframes.
-//
-// REMB is intentionally NOT relayed to the sender and NOT used for temporal
-// layer adaptation. The sender's congestion controller gets proper feedback via
-// the TWCC interceptor (transport-cc) which estimates the sender→SFU link
-// independently. All SVC temporal layers are forwarded to every receiver so the
-// configured FPS is locked — no dynamic frame-rate reduction.
+// relayReceiverRTCP relays PLI and FIR back to the original sender so it can generate
+// keyframes. REMB is deliberately not relayed: TWCC gives the sender its own feedback.
 func (c *Coordinator) relayReceiverRTCP(rtpSender *webrtc.RTPSender, senderPC *webrtc.PeerConnection, remoteSSRC uint32, receiverID, trackID string) {
 	defer func() {
 		if r := recover(); r != nil {

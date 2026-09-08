@@ -73,9 +73,8 @@ func TestMaxPeersIsTakenFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// The liveness settings decide who gets hung up on, so the two ways of getting
-// them wrong both have to be safe: a value nobody set, and a value somebody set
-// too tight.
+// The liveness settings decide who gets hung up on, so both ways of getting them wrong have
+// to be safe: a value nobody set, and a value somebody set too tight.
 
 func TestPingDefaultsWhenUnset(t *testing.T) {
 	t.Setenv("SFU_PING_INTERVAL", "")
@@ -109,9 +108,8 @@ func TestPingIsTakenFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// Zero is a value here rather than a missing one: it is how the whole mechanism
-// is switched off without a release, which is the escape hatch if it ever turns
-// out to be hanging up on people who were fine.
+// Zero is a value here rather than a missing one: it is how the whole mechanism is switched
+// off without a release, if it ever turns out to be hanging up on healthy peers.
 func TestZeroPingIntervalIsKept(t *testing.T) {
 	t.Setenv("SFU_PING_INTERVAL", "0")
 	t.Setenv("SFU_PONG_TIMEOUT", "")
@@ -169,9 +167,8 @@ func TestUnreadablePingValuesFallBack(t *testing.T) {
 	}
 }
 
-// Ending a call somebody is alone in is the one setting here that hangs up on
-// a person who is doing nothing wrong, so both the default and the off switch
-// have to be exactly what they say.
+// Ending a call somebody is alone in is the one setting that hangs up on a person doing
+// nothing wrong, so both the default and the off switch have to be exactly what they say.
 
 func TestCallAloneTimeoutDefaultsWhenUnset(t *testing.T) {
 	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "")
@@ -198,9 +195,8 @@ func TestCallAloneTimeoutIsTakenFromTheEnvironment(t *testing.T) {
 }
 
 func TestCallAloneTimeoutZeroIsOff(t *testing.T) {
-	// Zero has to survive as zero rather than falling back to the default,
-	// which is the whole point of reading it the long way round: this is how a
-	// server owner says a call should stay up until somebody closes it.
+	// Zero has to survive as zero rather than falling back to the default, which is the
+	// whole point of reading it the long way round.
 	t.Setenv("SFU_CALL_ALONE_TIMEOUT", "0")
 
 	cfg, err := Load()
@@ -224,10 +220,8 @@ func TestCallAloneTimeoutIgnoresNonsense(t *testing.T) {
 	}
 }
 
-// Forcing an address turns discovery off by itself. Without this the SFU keeps
-// gathering a server-reflexive candidate carrying whatever address its current
-// egress happens to have, which is how a stale advertised address goes
-// unnoticed: the reflexive one quietly carries the call instead. GRYT-768.
+// Forcing an address turns discovery off by itself. Otherwise the reflexive candidate quietly
+// carries the call on whatever address the current egress has (GRYT-768).
 func TestForcingAnAddressDisablesSTUN(t *testing.T) {
 	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10")
 	t.Setenv("DISABLE_STUN", "")
@@ -308,9 +302,8 @@ func TestAdvertisedAddressesThatAreNotIPsAreDropped(t *testing.T) {
 	}
 }
 
-// A private address is kept, because a LAN peer really can use it, but it is
-// worth warning about: on its own it means nobody outside the network can
-// connect. A stale one is how that happens without anybody noticing.
+// A private address is kept, because a LAN peer really can use it, but it is worth warning
+// about: on its own it means nobody outside the network can connect.
 func TestPrivateAdvertisedAddressIsKept(t *testing.T) {
 	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10,192.168.1.50")
 
@@ -323,10 +316,8 @@ func TestPrivateAdvertisedAddressIsKept(t *testing.T) {
 	}
 }
 
-// A LAN address next to a public one is the documented multi-network setup, so
-// both are kept: peers on the LAN take the short path, everybody else comes in
-// over the public address. Dropping the private one would push LAN peers out to
-// the public address and back.
+// A LAN address next to a public one is the documented multi-network setup, so both are
+// kept. Dropping the private one would push LAN peers out to the public address and back.
 func TestPublicAndPrivateAdvertisedAddressesAreBothKept(t *testing.T) {
 	t.Setenv("ICE_ADVERTISE_IP", "203.0.113.10,192.168.50.147")
 
@@ -382,9 +373,8 @@ func TestAnUnparseableValueStillRequiresTokens(t *testing.T) {
 	}
 }
 
-// Metrics moved off the port the world talks to. Registered on the default mux
-// they sat beside the signalling WebSocket, so anything fronting the SFU served
-// the Prometheus register to strangers. GRYT-741.
+// Metrics moved off the port the world talks to: on the default mux they sat beside the
+// signalling WebSocket, so anything fronting the SFU served the register (GRYT-741).
 func TestMetricsGetTheirOwnPortByDefault(t *testing.T) {
 	t.Setenv("SFU_METRICS_PORT", "")
 
