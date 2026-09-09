@@ -58,6 +58,10 @@ type Config struct {
 	// cmd/sfu/main.go. Zero switches serving them off entirely.
 	MetricsPort int
 
+	// Where servers register. Deliberately not the main port: the main one is
+	// published so clients can reach it, and registration must not ride along.
+	ControlPort int
+
 	// Capacity guardrail. Nothing to do with ports any more: one muxed port
 	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
@@ -198,6 +202,20 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// 9092, beside metrics on 9091, because both are container-only. 50xx is where
+	// published ports live and dev.yml already puts a host 5006 on the SFU.
+
+	// No zero-disables, unlike metrics: an SFU nothing can register with is not an
+	// SFU, so the only choice here is which port, never whether.
+	controlPort := 9092
+	if raw := strings.TrimSpace(os.Getenv("SFU_CONTROL_PORT")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 65535 {
+			controlPort = parsed
+		} else {
+			log.Printf("Warning: SFU_CONTROL_PORT=%q is not a port; using %d", raw, controlPort)
+		}
+	}
+
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
 
@@ -217,6 +235,7 @@ func Load() (*Config, error) {
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,
+		ControlPort:        controlPort,
 		MaxPeers:           maxPeers,
 		PingInterval:       pingInterval,
 		PongTimeout:        pongTimeout,
