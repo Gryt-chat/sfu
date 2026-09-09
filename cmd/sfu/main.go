@@ -276,10 +276,13 @@ func main() {
 		// Registration lives on the control port now, and refusing it here is the whole
 		// fix: this port is published, so anything reachable on it is reachable by anyone.
 		if r.URL.Path == "/server" {
-			log.Printf("🚫 Refused server registration on the public port from %s — use SFU_CONTROL_PORT (%d)", r.RemoteAddr, cfg.ControlPort)
+			// The header names the control port so a server still pointed here can move
+			// itself. It hands a stranger nothing: an unpublished port is no less shut.
+			w.Header().Set("X-Gryt-Control-Port", strconv.Itoa(cfg.ControlPort))
+			log.Printf("🚫 Refused server registration on the public port from %s — pointed it at %d", r.RemoteAddr, cfg.ControlPort)
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("Server registration is not served on this port. Point SFU_WS_HOST at the control port.\n"))
+			fmt.Fprintf(w, "Server registration is not served on this port. Point SFU_WS_HOST at port %d.\n", cfg.ControlPort)
 			return
 		}
 
