@@ -202,9 +202,12 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// 9092, beside metrics on 9091, because both are container-only. The 50xx
+	// range is where published ports live and dev.yml already puts a host 5006 there.
+	//
 	// No zero-disables here, unlike metrics. An SFU that cannot be registered
 	// with is not an SFU, so the only choice is which port, never whether.
-	controlPort := 5006
+	controlPort := 9092
 	if raw := strings.TrimSpace(os.Getenv("SFU_CONTROL_PORT")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 65535 {
 			controlPort = parsed
