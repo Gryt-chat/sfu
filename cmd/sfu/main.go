@@ -246,11 +246,10 @@ func main() {
 		}
 	})
 
-	// Handle WebSocket connections with recovery wrapper
-	// Registration gets a listener of its own, for the same reason metrics do.
-	// On one port, /server sat beside the client WebSocket, so publishing the port
-	// so clients could reach it published registration too — and any stranger
-	// could claim an unused server id and use this SFU as their own relay.
+	// Registration gets a listener of its own, for the same reason metrics do: on
+	// one port, publishing it for clients published /server to strangers too.
+
+	// Any stranger could then claim an unused server id and use this SFU as a relay.
 	controlMux := http.NewServeMux()
 	controlMux.HandleFunc("/server", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Upgrade") == "websocket" && r.Header.Get("Connection") != "" {
@@ -272,10 +271,10 @@ func main() {
 		}
 	})
 
+	// Handle WebSocket connections with recovery wrapper
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Registration lives on the control port now. Refusing it here is the whole
-		// fix: this port is the published one, so anything reachable on it is
-		// reachable by anyone.
+		// Registration lives on the control port now, and refusing it here is the whole
+		// fix: this port is published, so anything reachable on it is reachable by anyone.
 		if r.URL.Path == "/server" {
 			log.Printf("🚫 Refused server registration on the public port from %s — use SFU_CONTROL_PORT (%d)", r.RemoteAddr, cfg.ControlPort)
 			w.Header().Set("Content-Type", "text/plain")

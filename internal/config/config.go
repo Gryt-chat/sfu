@@ -202,11 +202,11 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// 9092, beside metrics on 9091, because both are container-only. The 50xx
-	// range is where published ports live and dev.yml already puts a host 5006 there.
-	//
-	// No zero-disables here, unlike metrics. An SFU that cannot be registered
-	// with is not an SFU, so the only choice is which port, never whether.
+	// 9092, beside metrics on 9091, because both are container-only. 50xx is where
+	// published ports live and dev.yml already puts a host 5006 on the SFU.
+
+	// No zero-disables, unlike metrics: an SFU nothing can register with is not an
+	// SFU, so the only choice here is which port, never whether.
 	controlPort := 9092
 	if raw := strings.TrimSpace(os.Getenv("SFU_CONTROL_PORT")); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 65535 {
