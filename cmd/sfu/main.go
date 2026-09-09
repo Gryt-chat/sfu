@@ -247,7 +247,43 @@ func main() {
 	})
 
 	// Handle WebSocket connections with recovery wrapper
+	// Registration gets a listener of its own, for the same reason metrics do.
+	// On one port, /server sat beside the client WebSocket, so publishing the port
+	// so clients could reach it published registration too — and any stranger
+	// could claim an unused server id and use this SFU as their own relay.
+	controlMux := http.NewServeMux()
+	controlMux.HandleFunc("/server", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Upgrade") == "websocket" && r.Header.Get("Connection") != "" {
+			recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONTROL_CONNECTION", "", "", r.RemoteAddr, func() error {
+				wsHandler.HandleWebSocket(w, r)
+				return nil
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("This endpoint only accepts WebSocket connections."))
+	})
+	recovery.SafeGoroutine("MAIN", "CONTROL_LISTENER", func() {
+		addr := fmt.Sprintf(":%d", cfg.ControlPort)
+		log.Printf("🔐 Server registration on %d (container-only; do not publish this port)", cfg.ControlPort)
+		if err := http.ListenAndServe(addr, controlMux); err != nil {
+			log.Printf("❌ Control listener stopped: %v", err)
+		}
+	})
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Registration lives on the control port now. Refusing it here is the whole
+		// fix: this port is the published one, so anything reachable on it is
+		// reachable by anyone.
+		if r.URL.Path == "/server" {
+			log.Printf("🚫 Refused server registration on the public port from %s — use SFU_CONTROL_PORT (%d)", r.RemoteAddr, cfg.ControlPort)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte("Server registration is not served on this port. Point SFU_WS_HOST at the control port.\n"))
+			return
+		}
+
 		// Check if this is a WebSocket upgrade request
 		if r.Header.Get("Upgrade") == "websocket" && r.Header.Get("Connection") != "" {
 			recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_CONNECTION", "", "", r.RemoteAddr, func() error {
@@ -269,7 +305,7 @@ func main() {
 	log.Printf("✅ Endpoints configured:")
 	log.Printf("   📡 / (WebSocket client endpoint)")
 	log.Printf("   📡 /client (explicit WebSocket client endpoint)")
-	log.Printf("   📡 /server (WebSocket server registration endpoint)")
+	log.Printf("   🔐 /server on port %d (registration; container-only)", cfg.ControlPort)
 	log.Printf("   🏥 /health (HTTP health check endpoint)")
 	log.Printf("   📊 /metrics (Prometheus metrics endpoint)")
 
