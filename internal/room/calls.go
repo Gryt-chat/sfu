@@ -11,32 +11,16 @@ import (
 )
 
 /*
-Ending a call that one person is sitting in on their own (GRYT-711).
-
-A voice channel and a call are the same thing down here, and **only one of them
-should be ended for being quiet**. A channel is a place, and sitting in one
-alone is ordinary. A call is an event between named people, and being the only
-one left in it means it is over.
-
-The client ends its own call too. This is the half that catches the ones which
-never will — closed laptops, wedged tabs, anything modified — which are exactly
-the ones leaving rooms up.
+Ending a call one person is sitting in alone (GRYT-711). A channel is a place and sitting in
+one alone is ordinary; a call is over. This catches the clients that never end their own.
 */
 
-// callRoomID matches the ids the server gives a conversation, and only those.
-//
-// **The whole shape, not the `dm_` prefix.** An admin may name a channel
-// `dm_anything`, and the server calls that cost cosmetic because there the
-// worst case is a channel left out of a member list — here it is hanging up on
-// somebody sitting in a channel.
+// callRoomID matches the ids the server gives a conversation, and only those — the whole
+// shape, not the `dm_` prefix, since an admin may name a channel `dm_anything`.
 var callRoomID = regexp.MustCompile(`^dm_g?[0-9a-f]{32}$`)
 
-// IsCallRoom reports whether an SFU room is a call rather than a voice channel.
-//
-// The SFU knows a room as `serverID_channelID` — `sfuRoomId` on the server
-// side — and a server id may itself contain an underscore, so the prefix is
-// taken off by the server id the room already carries rather than by splitting
-// on the separator.
+// IsCallRoom reports whether an SFU room is a call rather than a voice channel. The prefix is
+// taken off by the server id the room carries, since a server id may contain an underscore.
 func IsCallRoom(roomID, serverID string) bool {
 	if serverID == "" {
 		return false
@@ -48,14 +32,8 @@ func IsCallRoom(roomID, serverID string) bool {
 	return callRoomID.MatchString(channelID)
 }
 
-// EndAbandonedCalls hangs up on calls that one person has been alone in for
-// longer than timeout. A timeout of zero switches it off.
-//
-// **Sweeping observes the state rather than trusting an "alone since" field.**
-// Every path that changes who is in a room would have to keep one honest,
-// including the stale-peer eviction inside AddPeerToRoom, and forgetting one
-// means a call that never ends or one that ends while two people are talking.
-// The cost is a deadline accurate to one sweep interval.
+// EndAbandonedCalls hangs up on calls one person has been alone in for longer than timeout;
+// zero switches it off. It observes state rather than trusting an "alone since" field.
 func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 	if timeout <= 0 {
 		return
@@ -111,9 +89,8 @@ func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 			room.mutex.RUnlock()
 		}
 
-		// Anything that filled up again, emptied, or was deleted. Left behind,
-		// a room that went back to two people and later back to one would be
-		// hung up on immediately, using a clock from the previous time.
+		// Anything that filled up again, emptied, or was deleted. Left behind, a room that
+		// went back to two and then to one would be hung up on with the old clock.
 		for roomID := range m.aloneSince {
 			if !seen[roomID] {
 				delete(m.aloneSince, roomID)
@@ -134,16 +111,8 @@ func (m *Manager) EndAbandonedCalls(timeout time.Duration) {
 	})
 }
 
-// StillHere restarts the alone clock for a room, and reports whether it did —
-// somebody pressing "stay in the call" (GRYT-715).
-//
-// **It restarts rather than granting one reprieve, and there is no cap.**
-// Somebody was at the keyboard when they pressed it, which is the entire thing
-// the sweep is trying to find out; what it exists to catch is the client that
-// never speaks.
-//
-// Writes `now` rather than deleting the entry, so the clock restarts here
-// instead of on the next sweep.
+// StillHere restarts the alone clock for a room and reports whether it did. It restarts
+// rather than granting one reprieve: somebody was at the keyboard, which is the question.
 func (m *Manager) StillHere(roomID string) bool {
 	moved := false
 
@@ -156,9 +125,8 @@ func (m *Manager) StillHere(roomID string) bool {
 			return nil
 		}
 
-		// Only calls, so a client cannot fill the map with entries for rooms
-		// the sweep will never look at. A voice channel is never ended for
-		// being quiet, so it has no clock to restart.
+		// Only calls, so a client cannot fill the map with rooms the sweep never looks at.
+		// A voice channel is never ended for being quiet, so it has no clock.
 		room.mutex.RLock()
 		isCall := IsCallRoom(roomID, room.ServerID)
 		room.mutex.RUnlock()

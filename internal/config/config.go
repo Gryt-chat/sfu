@@ -19,30 +19,20 @@ const (
 	// DefaultMaxPeers is a guardrail, not a property of the transport.
 	DefaultMaxPeers = 200
 
-	// DefaultPingInterval is how often the SFU pokes a quiet connection to
-	// check somebody is still on the other end. It doubles as the only traffic
-	// that travels server to client during a call, which is what keeps a NAT
-	// or firewall mapping from being reaped as idle.
+	// DefaultPingInterval is how often the SFU pokes a quiet connection. It doubles as the
+	// only server-to-client traffic in a call, which keeps a NAT mapping from being reaped.
 	DefaultPingInterval = 30 * time.Second
 
-	// DefaultPongTimeout is how long a peer may say nothing at all before the
-	// SFU gives up on it. Three ping intervals, so two pings have to go
-	// unanswered in a row before anybody is hung up on — a single lost pong,
-	// or one arriving late behind a stalled read, is not enough.
+	// DefaultPongTimeout is how long a peer may say nothing before the SFU gives up. Three
+	// ping intervals, so one lost pong or a late one is not enough.
 	DefaultPongTimeout = 90 * time.Second
 
-	// DefaultCallAloneTimeout is how long one person may be the only one in a
-	// call before the SFU ends it. Long enough that stepping away to let
-	// somebody back in is not punished, short enough to be worth doing.
-	//
-	// Calls only. A voice channel is a place and sitting in one alone is
-	// ordinary; internal/room/calls.go is where the two are told apart.
+	// DefaultCallAloneTimeout is how long one person may be alone in a call before the SFU
+	// ends it. Calls only: a voice channel is a place, and calls.go tells the two apart.
 	DefaultCallAloneTimeout = 2 * time.Minute
 
-	// DefaultCallSweepInterval is how often that is checked. It bounds the
-	// error on the timeout above — a call ends between the timeout and one
-	// interval after it — and it is the whole cost of the feature when nobody
-	// is in a call at all, which is a map iteration.
+	// DefaultCallSweepInterval is how often that is checked, which bounds the error on the
+	// timeout above and is the whole cost when nobody is in a call.
 	DefaultCallSweepInterval = 15 * time.Second
 )
 
@@ -72,9 +62,8 @@ type Config struct {
 	// carries far more peers than a machine has CPU and upload for.
 	MaxPeers int
 
-	// Liveness. The SFU pings each WebSocket every PingInterval and gives up on
-	// one that has said nothing for PongTimeout. internal/websocket/keepalive.go
-	// has the reasoning; a PingInterval of zero turns both off.
+	// Liveness. The SFU pings every PingInterval and gives up after PongTimeout;
+	// keepalive.go has the reasoning, and a PingInterval of zero turns both off.
 	PingInterval time.Duration
 	PongTimeout  time.Duration
 
@@ -105,26 +94,15 @@ func Load() (*Config, error) {
 		stunServers = []string{"stun:stun.l.google.com:19302"}
 	}
 
-	// One UDP port for all media. Unset it is 3478: the IANA STUN port,
-	// unprivileged, and the UDP port a locked-down network is most likely to
-	// have opened already, since Teams requires outbound 3478-3481.
-	//
-	// 443 is the tempting alternative and usually the wrong one. Firewall
-	// vendors recommend blocking UDP 443 precisely because QUIC there cannot be
-	// TLS-inspected, so on the networks you would choose it for it is the port
-	// most likely to be shut on purpose.
+	// One UDP port for all media, 3478 unset: the IANA STUN port, and the one a locked-down
+	// network most likely already allows. 443 is tempting and blocked on purpose by vendors.
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
 	if iceUDPMuxPort <= 0 || iceUDPMuxPort > 65535 {
 		iceUDPMuxPort = DefaultICEUDPMuxPort
 	}
 
-	// Parsed before the STUN decision below, because whether an operator has
-	// forced an address is what decides the default for DISABLE_STUN.
-	//
-	// Entries are validated rather than passed through. A value that is not an
-	// IP at all can never become a candidate, so it is dropped and said out
-	// loud — the failure is otherwise invisible, because the SFU keeps working
-	// on whatever else is in the list and nobody finds out it is wrong.
+	// Parsed before the STUN decision below, because a forced address decides DISABLE_STUN's
+	// default. Entries are validated and dropped out loud: the failure is otherwise invisible.
 	var iceAdvertiseIPs []string
 	hasRoutableAdvertiseIP := false
 	if raw := os.Getenv("ICE_ADVERTISE_IP"); raw != "" {
@@ -145,24 +123,15 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// A private address alongside a public one is the ordinary multi-network
-	// setup: peers on the LAN take the short path and everybody else comes in
-	// over the public address. Warning about that would be noise. A list with
-	// no routable address in it at all is the real problem, because the SFU
-	// then has nothing to offer anybody outside the network, and it fails the
-	// same quiet way the rest of this guards against.
+	// A private address alongside a public one is the ordinary multi-network setup. A list
+	// with no routable address at all is the real problem, and it fails just as quietly.
 	if len(iceAdvertiseIPs) > 0 && !hasRoutableAdvertiseIP {
 		log.Printf("Warning: no ICE_ADVERTISE_IP entry is routable from outside this network (%s); peers elsewhere will not be able to connect",
 			strings.Join(iceAdvertiseIPs, ", "))
 	}
 
-	// **Forcing an address turns STUN discovery off** unless the operator says
-	// otherwise. Discovery would add a candidate nobody chose, carrying whatever
-	// address the current egress path has — and when a tunnel goes down the SFU
-	// quietly starts handing out the fallback route's address instead of
-	// failing, so nothing surfaces it (GRYT-768).
-	//
-	// Setting DISABLE_STUN explicitly always wins, in either direction.
+	// Forcing an address turns STUN discovery off unless the operator says otherwise: when a
+	// tunnel drops, discovery hands out the fallback route's address instead (GRYT-768).
 	disableSTUN := len(iceAdvertiseIPs) > 0
 	if raw := strings.TrimSpace(os.Getenv("DISABLE_STUN")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -191,9 +160,8 @@ func Load() (*Config, error) {
 		maxPeers = DefaultMaxPeers
 	}
 
-	// Both in whole seconds. SFU_PING_INTERVAL=0 switches liveness checking off
-	// entirely, read deadline included — the escape hatch if this ever starts
-	// hanging up on people who were fine.
+	// Both in whole seconds. SFU_PING_INTERVAL=0 switches liveness checking off entirely,
+	// read deadline included — the escape hatch if this starts hanging up on healthy peers.
 	pingInterval := durationSecondsFromEnv("SFU_PING_INTERVAL", DefaultPingInterval)
 	pongTimeout := durationSecondsFromEnv("SFU_PONG_TIMEOUT", DefaultPongTimeout)
 
@@ -201,24 +169,16 @@ func Load() (*Config, error) {
 	// call stayed up until somebody closed it says so without a rebuild.
 	callAloneTimeout := durationSecondsFromEnv("SFU_CALL_ALONE_TIMEOUT", DefaultCallAloneTimeout)
 
-	// A timeout shorter than two ping intervals disconnects healthy peers: the
-	// deadline fires before a second ping has even gone out, so one lost pong
-	// is fatal. Raise it rather than refusing to start — an SFU that will not
-	// boot because somebody typed a small number is worse than one that says
-	// what it did instead.
+	// A timeout shorter than two ping intervals disconnects healthy peers, so it is raised
+	// rather than refused: an SFU that will not boot over a small number is worse.
 	if pingInterval > 0 && pongTimeout < 2*pingInterval {
 		log.Printf("Warning: SFU_PONG_TIMEOUT (%s) is under two ping intervals (%s); using %s, the least that survives a single lost pong",
 			pongTimeout, pingInterval, 2*pingInterval)
 		pongTimeout = 2 * pingInterval
 	}
 
-	// Debug configuration
-	// On unless somebody says otherwise. Defaulting this off left every
-	// deployment running with the hole open until an operator flipped a flag
-	// they had no reason to know about, which is not a default so much as a
-	// promise to remember. A staged upgrade that has to run this SFU against
-	// servers too old to mint tokens sets it to false for the duration, and
-	// that is a decision somebody makes rather than one they inherit.
+	// On unless somebody says otherwise. Defaulting off left every deployment with the hole
+	// open until an operator flipped a flag they had no reason to know about.
 	requireClientToken := true
 	if raw := strings.TrimSpace(os.Getenv("SFU_REQUIRE_CLIENT_TOKEN")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -265,12 +225,8 @@ func Load() (*Config, error) {
 	}, nil
 }
 
-// durationSecondsFromEnv reads a whole number of seconds, and keeps the default
-// when the variable is unset or unreadable.
-//
-// Zero is a value, not an absence — it is how liveness checking is turned off —
-// so an unset variable and an explicit 0 have to be told apart, which is why
-// this does not go through strconv.Atoi's zero-on-error.
+// durationSecondsFromEnv reads a whole number of seconds, keeping the default when unset or
+// unreadable. Zero is a value — it turns liveness off — so it cannot go through Atoi.
 func durationSecondsFromEnv(name string, fallback time.Duration) time.Duration {
 	raw := os.Getenv(name)
 	if raw == "" {

@@ -80,9 +80,8 @@ func TestJoinAgainstAnUnregisteredServerIsRefused(t *testing.T) {
 	}
 }
 
-// With the flag on, knowing the old shared password buys nothing. Until it is
-// on, it still does — which is why the flag exists rather than a comment saying
-// to remove the fallback later.
+// With the flag on, knowing the old shared password buys nothing. Until it is on, it still
+// does — which is why the flag exists rather than a comment saying to remove the fallback.
 func TestRequireClientTokenClosesTheLegacyPath(t *testing.T) {
 	m := managerWithServer(t)
 	m.SetRequireClientToken(true)
@@ -120,9 +119,8 @@ func TestAV2TokenWithoutSpeakSaysSo(t *testing.T) {
 	}
 }
 
-// The deprecated password path. A server old enough to use it has no `speak`
-// permission to express, so refusing the microphone there would break working
-// deployments to enforce a rule nobody set.
+// The deprecated password path. A server old enough to use it has no `speak` permission to
+// express, so refusing the microphone there would break working deployments.
 func TestThePasswordPathMaySpeak(t *testing.T) {
 	m := managerWithServer(t)
 	claims, err := m.ValidateClientJoin(testRoom, testServer, testPassword, "", testUser)

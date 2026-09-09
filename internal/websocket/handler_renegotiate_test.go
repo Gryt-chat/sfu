@@ -14,9 +14,8 @@ import (
 	"sfu-v2/pkg/types"
 )
 
-// newTestSocketPair gives back the two ends of a real WebSocket: the
-// ThreadSafeWriter the handler writes offers to, and the client end the test
-// reads them from.
+// newTestSocketPair gives back the two ends of a real WebSocket: the ThreadSafeWriter the
+// handler writes offers to, and the client end the test reads them from.
 func newTestSocketPair(t *testing.T) (*ThreadSafeWriter, *gorilla.Conn) {
 	t.Helper()
 
@@ -47,9 +46,8 @@ func newTestSocketPair(t *testing.T) (*ThreadSafeWriter, *gorilla.Conn) {
 	}
 }
 
-// newTestPeer gives back a peer connection with one video transceiver, so
-// CreateOffer has something to describe. No ICE is exchanged — every assertion
-// here is about signaling state, which does not need a connected transport.
+// newTestPeer gives back a peer connection with one video transceiver, so CreateOffer has
+// something to describe. No ICE: every assertion here is about signaling state.
 func newTestPeer(t *testing.T) *webrtc.PeerConnection {
 	t.Helper()
 

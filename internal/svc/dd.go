@@ -22,12 +22,8 @@ type templateEntry struct {
 	temporalID int
 }
 
-// DDParser parses Dependency Descriptor (DD) RTP header extensions.
-// It maintains the template dependency structure state so that subsequent
-// packets (which only carry a 3-byte mandatory header) can be resolved
-// to a temporal/spatial layer.
-//
-// Thread-safe: concurrent reads from the forwarding goroutine are protected.
+// DDParser parses Dependency Descriptor RTP header extensions, keeping the template
+// dependency structure so later 3-byte headers resolve to a layer. Safe for concurrent reads.
 type DDParser struct {
 	mu        sync.RWMutex
 	templates map[uint8]templateEntry
@@ -38,9 +34,8 @@ func NewDDParser() *DDParser {
 	return &DDParser{}
 }
 
-// Parse extracts FrameInfo from a raw DD header extension payload.
-// The extension data must be at least 3 bytes (mandatory descriptor).
-// If a template dependency structure is present, it is parsed and cached.
+// Parse extracts FrameInfo from a raw DD header extension payload. At least 3 bytes; a
+// template dependency structure, if present, is parsed and cached.
 func (p *DDParser) Parse(data []byte) (FrameInfo, error) {
 	if len(data) < 3 {
 		return FrameInfo{}, fmt.Errorf("dd: payload too short (%d bytes)", len(data))
@@ -55,9 +50,8 @@ func (p *DDParser) Parse(data []byte) (FrameInfo, error) {
 		SpatialID:    -1,
 	}
 
-	// If the payload is longer than 3 bytes, a template dependency structure
-	// update may be present. The first bit after the mandatory header indicates
-	// whether a template dependency structure follows.
+	// Longer than 3 bytes means a template dependency structure may follow. The first bit
+	// after the mandatory header is what says so.
 	if len(data) > 3 {
 		hasTDS := data[3]&0x80 != 0
 		if hasTDS {
@@ -75,18 +69,8 @@ func (p *DDParser) Parse(data []byte) (FrameInfo, error) {
 	return fi, nil
 }
 
-// parseTemplateStructure parses the template dependency structure from the DD
-// extension data starting at the byte that contains the template_dependency_structure_present_flag.
-//
-// Spec reference: https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension
-//
-// Layout (bit-level):
-//   - template_dependency_structure_present_flag (1 bit) — already confirmed true by caller
-//   - active_decode_targets_present_flag (1 bit)
-//   - template_id_offset (6 bits)
-//   - template_cnt_minus_one (6 bits) from dt_cnt parsing
-//   - For each template: spatial_id (2 bits), temporal_id (3 bits)
-//   - ... (chains, DTIs, frame diffs, etc. — we skip those)
+// parseTemplateStructure parses the template dependency structure, starting at the byte
+// holding the present flag. Bit layout: https://aomediacodec.github.io/av1-rtp-spec/
 func (p *DDParser) parseTemplateStructure(data []byte) {
 	if len(data) < 2 {
 		return
@@ -106,9 +90,8 @@ func (p *DDParser) parseTemplateStructure(data []byte) {
 	// dt_cnt: number of decode targets (5 bits)
 	dtCnt := r.readBits(5) + 1
 
-	// Parse template spatial/temporal IDs.
-	// Templates are listed until we see a repeated (spatial_id, temporal_id)
-	// pair that matches the first template, or we exceed a safety limit.
+	// Templates are listed until a repeated (spatial_id, temporal_id) pair matches the
+	// first, or a safety limit is hit.
 	type stPair struct{ s, t int }
 	var templates []templateEntry
 	var firstPair stPair

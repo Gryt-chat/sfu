@@ -33,25 +33,8 @@ func TestShouldBindICEUDPAddressSkipsLinkLocal(t *testing.T) {
 	}
 }
 
-// TestSentCandidatesOnlyCarryAdvertisedAddresses builds the same SettingEngine
-// the server builds, gathers a real candidate set, puts it through the same
-// filter the join handler applies, and asserts what would go out.
-//
-// This is the check nobody had. GRYT-768 advertised a private address for weeks
-// and nothing noticed, because voice kept working the whole time — a leaked
-// candidate is not a broken call, it is a working call that also tells everyone
-// where the box lives.
-//
-// It earned its place on the first run. On a dual-stack host with
-// ICE_ADVERTISE_IP set to one IPv4 address, Pion's rewrite rule replaces the
-// IPv4 host candidates and leaves every IPv6 one untouched — the machine's real
-// global and ULA addresses go out as they are. The rule replaces addresses of a
-// family it has a replacement for, and says nothing about the other one.
-//
-// Two assertions, and the second matters as much as the first: everything sent
-// is an address somebody named, *and* something is still sent. A filter that
-// dropped every candidate would satisfy the first on its own and would be a
-// server nobody can call.
+// TestSentCandidatesOnlyCarryAdvertisedAddresses gathers a real candidate set through the
+// same filter the join handler applies. Two assertions: only named addresses, and some sent.
 func TestSentCandidatesOnlyCarryAdvertisedAddresses(t *testing.T) {
 	cfg := &config.Config{
 		ICEUDPMuxPort:   0, // the OS picks, so this cannot collide with a running SFU

@@ -8,17 +8,8 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// TestOnConnectionStateChangeReplaces pins the pion behaviour the whole of
-// GRYT-570 rests on.
-//
-// OnConnectionStateChange is handler.Store(f) — a setter, not a subscription.
-// Registering a second one silently turns the first off, with no error and no
-// log, which is why the bug it caused was invisible for so long.
-//
-// If a future pion makes these additive, this test fails and the shared channel
-// in setupWebRTCHandlers can go back to being per-track. That is the only
-// reason to keep it: it is a test of somebody else's library, kept because a
-// change there would change what is correct here.
+// TestOnConnectionStateChangeReplaces pins the pion behaviour GRYT-570 rests on: it is a
+// setter, so a second registration silently turns the first off. A test of someone's library.
 func TestOnConnectionStateChangeReplaces(t *testing.T) {
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
@@ -70,13 +61,8 @@ func TestOnConnectionStateChangeReplaces(t *testing.T) {
 	}
 }
 
-// TestSharedCloseReleasesEveryWaiter is the shape the fix relies on: one
-// channel, closed once, releasing every track's cleanup rather than only the
-// one that registered last.
-//
-// The bug needed two tracks to show itself — audio and a camera, which is the
-// ordinary case now that a phone can send video — so the count here is what
-// matters rather than the mechanism.
+// TestSharedCloseReleasesEveryWaiter is the shape the fix relies on: one channel, closed
+// once, releasing every track's cleanup rather than only the last registered.
 func TestSharedCloseReleasesEveryWaiter(t *testing.T) {
 	closed := make(chan struct{})
 	var once sync.Once
@@ -95,9 +81,8 @@ func TestSharedCloseReleasesEveryWaiter(t *testing.T) {
 		}(i)
 	}
 
-	// Twice, because a peer connection can report Failed and then Closed and
-	// both call this. Closing a channel twice panics; sync.Once is what stops
-	// it, and that is worth a test rather than a comment.
+	// Twice, because a peer connection can report Failed and then Closed and both call this.
+	// Closing a channel twice panics; sync.Once is what stops it.
 	markClosed()
 	markClosed()
 

@@ -41,56 +41,11 @@ func TestParseTooShort(t *testing.T) {
 func TestParseWithTemplateStructure(t *testing.T) {
 	p := NewDDParser()
 
-	// Build a synthetic DD payload with a template dependency structure.
-	// Mandatory header: start=1 end=1 template_id=0 frame=0
-	// Byte 3: template_dependency_structure_present_flag=1, active_decode_targets_present_flag=0, template_id_offset=0
-	// Then: dt_cnt_minus1=0 (5 bits = 00000) → dt_cnt=1
-	// Templates (L1T3): 3 templates
-	//   T0: spatial=0 (00), temporal=0 (000) → bits: 00 000
-	//   T1: spatial=0 (00), temporal=1 (001) → bits: 00 001
-	//   T2: spatial=0 (00), temporal=2 (010) → bits: 00 010
-	//   End marker: spatial=0 (00), temporal=0 (000) → bits: 00 000
-	//
-	// Bit layout after mandatory 3 bytes:
-	//   Byte 3: [1][0][000000]  = 0x80 (TDS present, no active targets, offset=0)
-	//   Byte 4: [00000][00 00] = dt_cnt-1=0 (5 bits), then T0 spatial(2)+temporal(3) starts
-	//     dt_cnt-1 = 00000
-	//     T0: 00 000
-	//     so byte 4: 00000_00 0  = next bits continue to byte 5
-	//   Let me lay it out bit by bit:
-	//
-	// Byte 3 (bits 0-7):   1 0 000000    → TDS=1, active=0, offset=0
-	// Byte 4 (bits 8-15):  00000 00 000  → dtCnt-1=0, T0: s=0 t=0 (first 2+3=5 bits)
-	//   Actually bits 8-12: 00000 (dtCnt=1)
-	//   bits 13-14: 00 (T0 spatial)
-	//   bit 15: 0 (T0 temporal bit0)
-	// Byte 5 (bits 16-23): 00 00 001 00  → T0 temporal bits 1-2 = 00, T1: s=0 t=1
-	//   bits 16-17: 00 (T0 temporal bits 1-2)
-	//   bits 18-19: 00 (T1 spatial)
-	//   bits 20-22: 001 (T1 temporal = 1)
-	//   bit 23: 0 (T2 spatial bit0)
-	// Byte 6 (bits 24-31): 0 010 00 000  → T2 spatial bit1=0, T2 temporal=2, end marker s=0 t=0
-	//   bit 24: 0 (T2 spatial bit1)
-	//   bits 25-27: 010 (T2 temporal = 2)
-	//   bits 28-29: 00 (end marker spatial)
-	//   bits 30-32: 000 (end marker temporal)
-	//
-	// So:
-	// Byte 3: 10000000 = 0x80
-	// Byte 4: 00000_00_0 = bits: 00000 00 0 = 0x00
-	// Byte 5: 00 00 001 0 = 0x02
-	// Byte 6: 0 010 00 000 = 0x40
-	// Byte 7: pad
+	// A synthetic DD payload carrying an L1T3 template structure, worked out against
+	// https://aomediacodec.github.io/av1-rtp-spec/ — bytes 3 to 6 are 0x80 0x00 0x02 0x40.
 
-	// Bit layout of the TDS portion (bytes 3+):
-	//   Byte 3: [1][0][000000]                        = 0x80
-	//   Byte 4: [00000][00][0]                         = 0x00
-	//           dtCnt-1  T0s  T0t(MSB)
-	//   Byte 5: [00][00][001][0]                       = 0x02
-	//           T0t T1s  T1t  T2s(MSB)
-	//   Byte 6: [0][010][00][000]                      = 0x20
-	//           T2s T2t  Es   Et
-	//   Byte 7: [0...]                                 = 0x00
+	// The same TDS portion, bit by bit: byte 3 0x80, byte 4 0x00, byte 5 0x02, byte 6 0x20.
+	// See the spec link in dd.go for what each field is.
 	data := []byte{
 		0xC0, 0x00, 0x00, // mandatory: start=1 end=1 template_id=0 frame=0
 		0x80, // TDS present, no active decode targets, offset=0

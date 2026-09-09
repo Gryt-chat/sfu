@@ -15,13 +15,8 @@ import (
 )
 
 /*
-still_here from the wire to the clock (GRYT-715).
-
-internal/room covers what StillHere does. This covers the part between: that a
-frame a client actually sends reaches it, keyed by the same room id the sweep
-iterates. Getting that wrong is silent — the message is accepted, nothing is
-logged above debug, and the call ends two minutes later as if no button had
-been pressed.
+still_here from the wire to the clock (GRYT-715): that a frame a client sends reaches it,
+keyed by the same room id the sweep iterates. Getting it wrong is silent.
 */
 
 const stillHereServerID = "gryt-wire-test"
@@ -42,13 +37,8 @@ func callRoomWithOnePeer(t *testing.T, m *room.Manager) (string, *gorilla.Conn) 
 	return roomID, victimClient
 }
 
-// hungUpOn reports whether the SFU closed the peer's socket, by reading until
-// something happens: a close comes back as an error, and a call that is still
-// up comes back as the read deadline expiring with nothing on it.
-//
-// The distinction is the whole test. Treating any error as a hang-up makes both
-// cases below pass whatever the code does, because a socket nobody writes to
-// always times out.
+// hungUpOn reports whether the SFU closed the peer's socket: a close comes back as an error,
+// a live call as the read deadline expiring. Treating any error as a hang-up passes always.
 func hungUpOn(conn *gorilla.Conn, within time.Duration) bool {
 	_ = conn.SetReadDeadline(time.Now().Add(within))
 	_, _, err := conn.ReadMessage()
