@@ -480,3 +480,57 @@ func TestAControlHostThatIsNotAnAddressRefusesToLoad(t *testing.T) {
 		}
 	}
 }
+
+// Unset has to stay every interface too. Prometheus in the Compose files scrapes sfu:9091 from
+// another container, so a loopback default would leave the SFU panels empty.
+func TestMetricsHostDefaultsToEveryInterface(t *testing.T) {
+	t.Setenv("SFU_METRICS_HOST", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MetricsHost != "" {
+		t.Fatalf("MetricsHost = %q, want empty, which binds every interface", cfg.MetricsHost)
+	}
+}
+
+func TestMetricsHostIsTakenFromTheEnvironment(t *testing.T) {
+	t.Setenv("SFU_CONTROL_HOST", "")
+
+	for value, want := range map[string]string{
+		"127.0.0.1":   "127.0.0.1",
+		" 127.0.0.1 ": "127.0.0.1",
+		"::1":         "::1",
+		"10.0.0.5":    "10.0.0.5",
+	} {
+		t.Setenv("SFU_METRICS_HOST", value)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("SFU_METRICS_HOST=%q: %v", value, err)
+		}
+		if cfg.MetricsHost != want {
+			t.Fatalf("SFU_METRICS_HOST=%q gave %q, want %q", value, cfg.MetricsHost, want)
+		}
+		if cfg.ControlHost != "" {
+			t.Fatalf("SFU_METRICS_HOST=%q moved registration to %q as well", value, cfg.ControlHost)
+		}
+	}
+}
+
+// Refused like the control host, and for the same reason: falling back to every interface
+// would serve metrics to the network somebody was trying to keep them off.
+func TestAMetricsHostThatIsNotAnAddressRefusesToLoad(t *testing.T) {
+	for _, value := range []string{"localhost", "sfu", "127.0.0.1:9091", "[::1]", "127.0.0."} {
+		t.Setenv("SFU_METRICS_HOST", value)
+
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("SFU_METRICS_HOST=%q loaded, want it refused", value)
+		}
+		if !strings.Contains(err.Error(), "SFU_METRICS_HOST") {
+			t.Fatalf("SFU_METRICS_HOST=%q was refused without naming the variable: %v", value, err)
+		}
+	}
+}

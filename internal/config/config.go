@@ -59,6 +59,10 @@ type Config struct {
 	// cmd/sfu/main.go. Zero switches serving them off entirely.
 	MetricsPort int
 
+	// The address MetricsPort binds. Empty is every interface, which Prometheus in another
+	// container needs; the desktop app sets 127.0.0.1, since nothing off the machine reads them.
+	MetricsHost string
+
 	// Where servers register. Deliberately not the main port: the main one is
 	// published so clients can reach it, and registration must not ride along.
 	ControlPort int
@@ -228,6 +232,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SFU_CONTROL_HOST=%q is not an IP address. Use 127.0.0.1 to take registration from this machine only, or leave it unset for every interface", controlHost)
 	}
 
+	// Refused for the same reason, even though a metrics port that fails to bind is only logged.
+	metricsHost := strings.TrimSpace(os.Getenv("SFU_METRICS_HOST"))
+	if metricsHost != "" && net.ParseIP(metricsHost) == nil {
+		return nil, fmt.Errorf("SFU_METRICS_HOST=%q is not an IP address. Use 127.0.0.1 to serve metrics to this machine only, or leave it unset for every interface", metricsHost)
+	}
+
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
 
@@ -247,6 +257,7 @@ func Load() (*Config, error) {
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,
+		MetricsHost:        metricsHost,
 		ControlPort:        controlPort,
 		ControlHost:        controlHost,
 		MaxPeers:           maxPeers,
