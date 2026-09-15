@@ -180,12 +180,32 @@ jobs:
             exit 1
           fi
 
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      # The version is known and nothing is tagged yet. Without a line the site's
+      # build fails and gryt.chat stops deploying (GRYT-1108).
+      - name: Require a changelog line
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GATE="https://raw.githubusercontent.com/Gryt-chat/gryt/main/.github/scripts/check-release-line.mjs"
+          if ! curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/check-release-line.mjs" "$GATE"; then
+            echo "Could not download $GATE, so the line was not checked. Nothing is tagged yet."
+            exit 1
+          fi
+
+          node "$RUNNER_TEMP/check-release-line.mjs" voice "${{ steps.version.outputs.version }}"
+
+      - name: Tag the release
+        shell: bash
+        run: |
+          set -euo pipefail
+
           # Tag only. Nothing is committed, so nothing is pushed to main and this works
           # against a protected branch. The tag names the dispatched commit.
-          git tag "v$NEW_VERSION"
-          git push origin "v$NEW_VERSION"
-
-          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
 
       - name: Run go vet
         shell: bash
