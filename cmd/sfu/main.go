@@ -57,10 +57,15 @@ func main() {
 
 	// Bound before anything is served. The public port names this one to servers, so an SFU
 	// that couldn't take it would send them, password and all, to whoever holds it.
-	controlListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ControlPort))
+	controlAddr := net.JoinHostPort(cfg.ControlHost, strconv.Itoa(cfg.ControlPort))
+	controlListener, err := net.Listen("tcp", controlAddr)
 	if err != nil {
 		logger.LogAction("MAIN", "CONTROL_PORT_TAKEN", "", "", err.Error())
-		log.Fatalf("❌ Cannot take server registration on %d: %v. Set SFU_CONTROL_PORT to a free port", cfg.ControlPort, err)
+		hint := "Set SFU_CONTROL_PORT to a free port"
+		if cfg.ControlHost != "" {
+			hint += ", or SFU_CONTROL_HOST to an address this machine has"
+		}
+		log.Fatalf("❌ Cannot take server registration on %s: %v. %s", controlAddr, err, hint)
 	}
 
 	// Log startup information
@@ -272,7 +277,7 @@ func main() {
 		w.Write([]byte("This endpoint only accepts WebSocket connections."))
 	})
 	recovery.SafeGoroutine("MAIN", "CONTROL_LISTENER", func() {
-		log.Printf("🔐 Server registration on %d (container-only; do not publish this port)", cfg.ControlPort)
+		log.Printf("🔐 Server registration on %s (container-only; do not publish this port)", controlListener.Addr())
 		// Fatal for the same reason as the bind: once Serve returns, the port is free for anyone.
 		if err := http.Serve(controlListener, controlMux); err != nil {
 			log.Fatalf("❌ Control listener stopped: %v", err)
@@ -315,7 +320,7 @@ func main() {
 	log.Printf("✅ Endpoints configured:")
 	log.Printf("   📡 / (WebSocket client endpoint)")
 	log.Printf("   📡 /client (explicit WebSocket client endpoint)")
-	log.Printf("   🔐 /server on port %d (registration; container-only)", cfg.ControlPort)
+	log.Printf("   🔐 /server on %s (registration; container-only)", controlListener.Addr())
 	log.Printf("   🏥 /health (HTTP health check endpoint)")
 	log.Printf("   📊 /metrics (Prometheus metrics endpoint)")
 
