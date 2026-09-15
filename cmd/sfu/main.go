@@ -233,9 +233,9 @@ func main() {
 	if cfg.MetricsPort > 0 {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
-		addr := fmt.Sprintf(":%d", cfg.MetricsPort)
+		addr := net.JoinHostPort(cfg.MetricsHost, strconv.Itoa(cfg.MetricsPort))
 		recovery.SafeGoroutine("MAIN", "METRICS_LISTENER", func() {
-			log.Printf("📊 Metrics on %d (container-only; do not publish this port)", cfg.MetricsPort)
+			log.Printf("📊 Metrics on %s (container-only; do not publish this port)", addr)
 			if err := http.ListenAndServe(addr, metricsMux); err != nil {
 				log.Printf("❌ Metrics listener stopped: %v", err)
 			}
