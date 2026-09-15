@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -427,6 +428,55 @@ func TestAnUnparseableMetricsPortFallsBack(t *testing.T) {
 		}
 		if cfg.MetricsPort != 9091 {
 			t.Fatalf("SFU_METRICS_PORT=%q gave %d, want the 9091 default", v, cfg.MetricsPort)
+		}
+	}
+}
+
+// Unset has to stay every interface. In Compose the server reaches registration over the
+// container network, so a loopback default would take voice down on every deployment.
+func TestControlHostDefaultsToEveryInterface(t *testing.T) {
+	t.Setenv("SFU_CONTROL_HOST", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ControlHost != "" {
+		t.Fatalf("ControlHost = %q, want empty, which binds every interface", cfg.ControlHost)
+	}
+}
+
+func TestControlHostIsTakenFromTheEnvironment(t *testing.T) {
+	for value, want := range map[string]string{
+		"127.0.0.1":   "127.0.0.1",
+		" 127.0.0.1 ": "127.0.0.1",
+		"::1":         "::1",
+		"10.0.0.5":    "10.0.0.5",
+	} {
+		t.Setenv("SFU_CONTROL_HOST", value)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("SFU_CONTROL_HOST=%q: %v", value, err)
+		}
+		if cfg.ControlHost != want {
+			t.Fatalf("SFU_CONTROL_HOST=%q gave %q, want %q", value, cfg.ControlHost, want)
+		}
+	}
+}
+
+// Anything that isn't an address stops the SFU. A fallback to every interface would open
+// the port to the network somebody was trying to keep out, and nothing would say so.
+func TestAControlHostThatIsNotAnAddressRefusesToLoad(t *testing.T) {
+	for _, value := range []string{"localhost", "sfu", "127.0.0.1:9092", "[::1]", "127.0.0."} {
+		t.Setenv("SFU_CONTROL_HOST", value)
+
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("SFU_CONTROL_HOST=%q loaded, want it refused", value)
+		}
+		if !strings.Contains(err.Error(), "SFU_CONTROL_HOST") {
+			t.Fatalf("SFU_CONTROL_HOST=%q was refused without naming the variable: %v", value, err)
 		}
 	}
 }

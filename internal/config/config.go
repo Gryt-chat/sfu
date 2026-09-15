@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -61,6 +62,10 @@ type Config struct {
 	// Where servers register. Deliberately not the main port: the main one is
 	// published so clients can reach it, and registration must not ride along.
 	ControlPort int
+
+	// The address ControlPort binds. Empty is every interface; the desktop app sets
+	// 127.0.0.1, because a server on another machine has no business registering there.
+	ControlHost string
 
 	// Capacity guardrail. Nothing to do with ports any more: one muxed port
 	// carries far more peers than a machine has CPU and upload for.
@@ -216,6 +221,13 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Refused rather than warned about like the ports above: falling back to every
+	// interface would open the port to exactly the network this was set to keep out.
+	controlHost := strings.TrimSpace(os.Getenv("SFU_CONTROL_HOST"))
+	if controlHost != "" && net.ParseIP(controlHost) == nil {
+		return nil, fmt.Errorf("SFU_CONTROL_HOST=%q is not an IP address. Use 127.0.0.1 to take registration from this machine only, or leave it unset for every interface", controlHost)
+	}
+
 	debug, _ := strconv.ParseBool(os.Getenv("DEBUG"))
 	verboseLog, _ := strconv.ParseBool(os.Getenv("VERBOSE_LOG"))
 
@@ -236,6 +248,7 @@ func Load() (*Config, error) {
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,
 		ControlPort:        controlPort,
+		ControlHost:        controlHost,
 		MaxPeers:           maxPeers,
 		PingInterval:       pingInterval,
 		PongTimeout:        pongTimeout,
