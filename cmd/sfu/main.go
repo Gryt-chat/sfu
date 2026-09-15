@@ -55,6 +55,14 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	// Bound before anything is served. The public port names this one to servers, so an SFU
+	// that couldn't take it would send them, password and all, to whoever holds it.
+	controlListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ControlPort))
+	if err != nil {
+		logger.LogAction("MAIN", "CONTROL_PORT_TAKEN", "", "", err.Error())
+		log.Fatalf("❌ Cannot take server registration on %d: %v. Set SFU_CONTROL_PORT to a free port", cfg.ControlPort, err)
+	}
+
 	// Log startup information
 	banner := fmt.Sprintf("Gryt SFU v%s", Version)
 	border := strings.Repeat("─", len(banner)+4)
@@ -264,10 +272,10 @@ func main() {
 		w.Write([]byte("This endpoint only accepts WebSocket connections."))
 	})
 	recovery.SafeGoroutine("MAIN", "CONTROL_LISTENER", func() {
-		addr := fmt.Sprintf(":%d", cfg.ControlPort)
 		log.Printf("🔐 Server registration on %d (container-only; do not publish this port)", cfg.ControlPort)
-		if err := http.ListenAndServe(addr, controlMux); err != nil {
-			log.Printf("❌ Control listener stopped: %v", err)
+		// Fatal for the same reason as the bind: once Serve returns, the port is free for anyone.
+		if err := http.Serve(controlListener, controlMux); err != nil {
+			log.Fatalf("❌ Control listener stopped: %v", err)
 		}
 	})
 
