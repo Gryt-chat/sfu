@@ -266,6 +266,10 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 				})
 			}()
 
+			// The sender's reports only reach the interceptors when read. Unread, the receiver
+			// reports we send back carry no LSR, and the browser gets no round-trip time from them.
+			go drainRTCP(receiver)
+
 			h.debugLog("🎵 Created local track with LayerForwarder for %s", clientID)
 			metrics.TracksActive.Inc()
 			h.coordinator.OnTrackAddedToRoom(roomID)
@@ -276,6 +280,20 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 			return nil
 		})
 	})
+}
+
+// drainRTCP reads a receiver's incoming RTCP until the receiver stops, discarding it once
+// the interceptors have seen it.
+func drainRTCP(receiver *webrtc.RTPReceiver) {
+	if receiver == nil {
+		return
+	}
+	buf := make([]byte, 1500)
+	for {
+		if _, _, err := receiver.Read(buf); err != nil {
+			return
+		}
+	}
 }
 
 // isMicrophone reports whether a track arrived on the transceiver set aside for microphone
