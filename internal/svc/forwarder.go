@@ -3,9 +3,7 @@ package svc
 import (
 	"log"
 	"sync"
-	"time"
 
-	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -166,11 +164,6 @@ func (lf *LayerForwarder) run() {
 		}
 	}()
 
-	// Periodic PLI for video tracks so late-joining receivers get keyframes.
-	if lf.remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
-		go lf.periodicPLI()
-	}
-
 	buf := make([]byte, 1500)
 	var header rtp.Header
 
@@ -260,29 +253,6 @@ func (lf *LayerForwarder) extractTemporalID(h *rtp.Header) int {
 	}
 
 	return -1
-}
-
-// periodicPLI sends PLI every 2 seconds to the sender for video tracks.
-// Shorter intervals improve keyframe recovery for high-fps screen shares.
-func (lf *LayerForwarder) periodicPLI() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-lf.stopped:
-			return
-		case <-ticker.C:
-			if lf.senderPC.ConnectionState() == webrtc.PeerConnectionStateClosed {
-				return
-			}
-			if writeErr := lf.senderPC.WriteRTCP([]rtcp.Packet{
-				&rtcp.PictureLossIndication{MediaSSRC: lf.remoteSSRC},
-			}); writeErr != nil {
-				return
-			}
-		}
-	}
 }
 
 func (lf *LayerForwarder) debugLog(format string, args ...interface{}) {
