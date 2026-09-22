@@ -56,11 +56,11 @@ Every variable the SFU reads, and nothing it doesn't:
 
 ## Documentation
 
-Full docs at **[docs.gryt.chat/docs/sfu](https://docs.gryt.chat/docs/sfu)**:
+Full docs at **[docs.gryt.chat/docs/sfu](https://docs.gryt.chat/docs/host/sfu)**:
 
-- [SFU Overview](https://docs.gryt.chat/docs/sfu) — architecture, track management, connection states
-- [Voice Debugging](https://docs.gryt.chat/docs/sfu/voice-debugging) — troubleshooting audio issues
-- [Deployment](https://docs.gryt.chat/docs/deployment) — Docker Compose, Kubernetes
+- [SFU Overview](https://docs.gryt.chat/docs/host/sfu) — architecture, track management, connection states
+- [Voice Debugging](https://docs.gryt.chat/docs/host/voice-debugging) — troubleshooting audio issues
+- [Deployment](https://docs.gryt.chat/docs/host) — Docker Compose, Kubernetes
 
 ## Issues
 
