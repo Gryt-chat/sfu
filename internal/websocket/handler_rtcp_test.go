@@ -9,6 +9,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"sfu-v2/internal/auth"
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/track"
 	peerManager "sfu-v2/internal/webrtc"
@@ -75,7 +76,7 @@ func TestReceiverReportsEchoTheSendersReport(t *testing.T) {
 		t.Fatalf("create SFU peer: %v", err)
 	}
 	t.Cleanup(func() { _ = sfu.Close() })
-	h.setupWebRTCHandlers(sfu, conn, "client-a", "room-1", true)
+	h.setupWebRTCHandlers(sfu, conn, "client-a", "room-1", auth.Claims{Capabilities: []string{auth.CapSpeak}})
 
 	client, err := loopbackAPI().NewPeerConnection(webrtc.Configuration{})
 	if err != nil {

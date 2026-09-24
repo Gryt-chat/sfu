@@ -24,6 +24,17 @@ const (
 // screen-share audio is `share_screen` on the server and a different transceiver.
 const CapSpeak = "speak"
 
+// CapShareVideo gates the camera and CapShareScreen a share's video and audio. Each is
+// only read from a token that also carries CapVideoChecked — see MayShare.
+const (
+	CapShareVideo  = "share_video"
+	CapShareScreen = "share_screen"
+)
+
+// CapVideoChecked says the server decided both video capabilities. A server that predates
+// them never sends it, and its members keep the video they had.
+const CapVideoChecked = "video_checked"
+
 var (
 	ErrMalformed = errors.New("client token is malformed")
 	ErrSignature = errors.New("client token signature does not verify")
@@ -48,6 +59,15 @@ func (c Claims) Can(capability string) bool {
 		}
 	}
 	return false
+}
+
+// MayShare answers for CapShareVideo or CapShareScreen. Absent the marker the server never
+// decided, so the answer is yes, as it was before the SFU looked.
+func (c Claims) MayShare(capability string) bool {
+	if !c.Can(CapVideoChecked) {
+		return true
+	}
+	return c.Can(capability)
 }
 
 // Sign produces a v1 token binding a user to a room until expiresAt. The room and user are

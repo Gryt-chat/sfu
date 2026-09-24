@@ -145,7 +145,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		h.sendRoomJoined(conn, "Successfully joined room")
 
 		// Set up WebRTC event handlers with recovery
-		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, claims.Can(auth.CapSpeak))
+		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, claims)
 
 		// Signal the new peer connection to start the negotiation process
 		recovery.SafeExecuteWithContext("WEBSOCKET", "SIGNAL_PEER_CONNECTIONS", clientID, joinData.RoomID, "Starting peer signaling", func() error {
@@ -161,7 +161,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 // setupWebRTCHandlers sets up WebRTC event handlers with crash protection. Exactly one
 // OnConnectionStateChange registration: pion's Store replaces, so a second turns the first off.
-func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, canSpeak bool) {
+func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, claims auth.Claims) {
 	// Closed once, when the peer connection reaches a state it cannot come back from. Every
 	// track's cleanup waits on this, so they all fire rather than only the last registered.
 	closed := make(chan struct{})
@@ -243,10 +243,10 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
 
-			// Denied `speak` on this channel: drop the microphone rather than forward it.
-			// This is the only place the gate can be real — a client check is decoration.
-			if !canSpeak && isMicrophone(peerConnection, receiver) {
-				h.debugLog("🔇 Refusing microphone from %s in room '%s': token does not grant %q", clientID, roomID, auth.CapSpeak)
+			// Denied on this channel: drop the track rather than forward it. This is the only
+			// place the gate can be real — a client check is decoration.
+			if denied := refusedBy(claims, peerConnection, receiver, t.Kind()); denied != "" {
+				h.debugLog("🔇 Refusing %s track from %s in room '%s': token does not grant %q", t.Kind().String(), clientID, roomID, denied)
 				metrics.TracksRefused.Inc()
 				return nil
 			}
@@ -296,17 +296,61 @@ func drainRTCP(receiver *webrtc.RTPReceiver) {
 	}
 }
 
+// The SFU makes every offer, so these four slots are the only ones a client can send on,
+// and it cannot reorder them. TestTheSFUOffersMicrophoneFirst pins the order.
+const (
+	slotMicrophone = iota
+	slotCamera
+	slotScreen
+	slotScreenAudio
+)
+
+// slotOf finds which transceiver a track arrived on, or -1 for one this peer connection
+// does not own.
+func slotOf(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) (int, webrtc.RTPCodecType) {
+	if receiver == nil {
+		return -1, 0
+	}
+	for i, transceiver := range pc.GetTransceivers() {
+		if transceiver.Receiver() == receiver {
+			return i, transceiver.Kind()
+		}
+	}
+	return -1, 0
+}
+
 // isMicrophone reports whether a track arrived on the transceiver set aside for microphone
 // audio. Kind is checked as well as position, so reordering stops the gate rather than moves it.
 func isMicrophone(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) bool {
-	if receiver == nil {
-		return false
-	}
-	for i, transceiver := range pc.GetTransceivers() {
-		if transceiver.Receiver() != receiver {
-			continue
+	slot, kind := slotOf(pc, receiver)
+	return slot == slotMicrophone && kind == webrtc.RTPCodecTypeAudio
+}
+
+// refusedBy names the capability a track needs and the token lacks, or "" to forward it.
+// Camera and screen are told apart by slot, which is as far as the SFU can see.
+func refusedBy(claims auth.Claims, pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver, trackKind webrtc.RTPCodecType) string {
+	slot, kind := slotOf(pc, receiver)
+	var need []string
+	switch {
+	case slot == slotMicrophone && kind == webrtc.RTPCodecTypeAudio:
+		if !claims.Can(auth.CapSpeak) {
+			return auth.CapSpeak
 		}
-		return i == 0 && transceiver.Kind() == webrtc.RTPCodecTypeAudio
+		return ""
+	case slot == slotCamera && kind == webrtc.RTPCodecTypeVideo:
+		need = []string{auth.CapShareVideo}
+	case slot == slotScreen && kind == webrtc.RTPCodecTypeVideo,
+		slot == slotScreenAudio && kind == webrtc.RTPCodecTypeAudio:
+		need = []string{auth.CapShareScreen}
+	case trackKind == webrtc.RTPCodecTypeVideo:
+		// Video from a slot that should not exist. Unreachable today, and fails closed: it
+		// passes only a token that would let either kind through.
+		need = []string{auth.CapShareVideo, auth.CapShareScreen}
 	}
-	return false
+	for _, capability := range need {
+		if !claims.MayShare(capability) {
+			return capability
+		}
+	}
+	return ""
 }

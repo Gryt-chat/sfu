@@ -26,8 +26,8 @@ var (
 		Help: "Number of active media tracks being forwarded",
 	})
 
-	// Microphone tracks dropped because the token did not grant `speak`. Worth an alert only
-	// if it climbs on a server that grants it to everyone: tokens minted without it.
+	// Tracks dropped because the token lacked `speak`, `share_video` or `share_screen`. Worth an
+	// alert only if it climbs on a server that grants them to everyone: tokens minted without.
 	TracksRefused = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "gryt_sfu_tracks_refused_total",
 		Help: "Media tracks refused because the client token did not grant the capability",
