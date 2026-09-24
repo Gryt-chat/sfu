@@ -392,6 +392,8 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 					return nil
 				case types.EventSetLayer:
 					return h.handleSetLayer(message.Data, clientID, roomID)
+				case types.EventVideoDemand:
+					return h.handleVideoDemand(message.Data, clientID, roomID, peerConnection)
 				case types.EventStillHere:
 					now := time.Now()
 					if now.Sub(lastStillHere) < stillHereMinInterval {

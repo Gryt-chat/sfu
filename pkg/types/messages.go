@@ -69,6 +69,26 @@ type SetLayerData struct {
 	MaxTemporalLayer int    `json:"max_temporal_layer"` // -1 = all layers, 0 = T0 only, 1 = T0+T1, 2 = T0+T1+T2
 }
 
+// VideoDemandData is a viewer saying how big it draws the video of one stream, in device
+// pixels, and its display's refresh rate. Zero width or height means nobody can see it.
+type VideoDemandData struct {
+	StreamID string `json:"stream_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FPS      int    `json:"fps"`
+}
+
+// VideoWantedData tells a sender the most anybody wants of the stream on its m-line mid.
+// Unknown counts viewers that never reported, which the sender treats as full size.
+type VideoWantedData struct {
+	Mid      string `json:"mid"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FPS      int    `json:"fps"`
+	Watchers int    `json:"watchers"`
+	Unknown  int    `json:"unknown"`
+}
+
 // RoomJoinedData is the payload of the room_joined a client gets on joining. The server
 // connection gets a plain string on the same event: only a client has a countdown to draw.
 type RoomJoinedData struct {
@@ -98,4 +118,6 @@ const (
 	EventSyncResponse     = "sync_response"
 	EventSetLayer         = "set_layer"
 	EventStillHere        = "still_here"
+	EventVideoDemand      = "video_demand"
+	EventVideoWanted      = "video_wanted"
 )

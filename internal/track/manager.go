@@ -221,6 +221,19 @@ func (m *Manager) GetForwarder(roomID, trackID string) (*svc.LayerForwarder, boo
 	return nil, false
 }
 
+// GetVideoForwarderByStream finds the video forwarder for a stream id. A viewer knows remote
+// video by stream: the track id it sees differs from ours when the SFU reuses an m-line.
+func (m *Manager) GetVideoForwarderByStream(roomID, streamID string) (*svc.LayerForwarder, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, lf := range m.roomForwarders[roomID] {
+		if lf.StreamID() == streamID && lf.Kind() == webrtc.RTPCodecTypeVideo {
+			return lf, true
+		}
+	}
+	return nil, false
+}
+
 // GetForwardersInRoom returns all LayerForwarders for tracks in a room.
 func (m *Manager) GetForwardersInRoom(roomID string) map[string]*svc.LayerForwarder {
 	m.mu.RLock()
