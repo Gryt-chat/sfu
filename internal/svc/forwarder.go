@@ -1,9 +1,11 @@
 package svc
 
 import (
+	"encoding/binary"
 	"log"
 	"sync"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -13,6 +15,28 @@ type ReceiverState struct {
 	Track            *webrtc.TrackLocalStaticRTP
 	MaxTemporalLayer int // packets with temporal_id > this are dropped
 	active           bool
+
+	demand   Demand
+	reported bool // false for a viewer that never sent video_demand, which counts as full size
+
+	// Owned by run(). The gate only opens or closes on a frame's first packet, and every
+	// packet it held back comes off later sequence numbers, so the viewer sees no gap.
+	hidden   bool
+	seqShift uint16
+}
+
+// Demand is how big one viewer draws a video track, in device pixels. Zero means hidden.
+type Demand struct {
+	Width, Height, FPS int
+}
+
+func (d Demand) hidden() bool { return d.Width <= 0 || d.Height <= 0 }
+
+// Wanted is what the sender is told: the largest demand across viewers, how many are
+// watching, and how many never said.
+type Wanted struct {
+	Width, Height, FPS int
+	Watchers, Unknown  int
 }
 
 // LayerForwarder reads RTP from a remote track, parses the Dependency Descriptor, and
@@ -33,6 +57,8 @@ type LayerForwarder struct {
 	hasSVC   bool  // true once a DD extension has been seen
 
 	receivers map[string]*ReceiverState
+	wanted    Wanted
+	onWanted  func()
 
 	stopped chan struct{}
 	debug   bool
@@ -71,36 +97,123 @@ func (lf *LayerForwarder) GetRemoteSSRC() uint32 {
 // maxTemporalLayer = -1 means forward all layers (no filtering).
 func (lf *LayerForwarder) AddReceiver(receiverID string, maxTemporalLayer int) *webrtc.TrackLocalStaticRTP {
 	lf.mu.Lock()
-	defer lf.mu.Unlock()
-
 	if r, ok := lf.receivers[receiverID]; ok && r.Track != nil {
 		r.MaxTemporalLayer = maxTemporalLayer
 		r.active = true
+		lf.mu.Unlock()
 		return r.Track
 	}
 
 	track, err := webrtc.NewTrackLocalStaticRTP(lf.codec, lf.trackID, lf.streamID)
 	if err != nil {
 		lf.debugLog("failed to create per-receiver track for %s: %v", receiverID, err)
+		lf.mu.Unlock()
 		return nil
 	}
 
-	lf.receivers[receiverID] = &ReceiverState{
-		Track:            track,
-		MaxTemporalLayer: maxTemporalLayer,
-		active:           true,
+	// A demand can arrive before the track is added, right after a reconnect. Keep it.
+	rs := lf.receivers[receiverID]
+	if rs == nil {
+		rs = &ReceiverState{}
+		lf.receivers[receiverID] = rs
 	}
-
+	rs.Track = track
+	rs.MaxTemporalLayer = maxTemporalLayer
+	rs.active = true
+	changed := lf.recomputeWanted()
 	lf.debugLog("added receiver %s (maxTemporal=%d, total=%d)", receiverID, maxTemporalLayer, len(lf.receivers))
+	lf.mu.Unlock()
+
+	lf.notifyIf(changed)
 	return track
 }
 
-// RemoveReceiver removes a receiver from the fanout.
-func (lf *LayerForwarder) RemoveReceiver(receiverID string) {
+// RemoveReceiver removes a receiver from the fanout. Its demand goes with it, which can
+// lower what the sender is asked for.
+func (lf *LayerForwarder) RemoveReceiver(receiverID string) (Wanted, bool) {
 	lf.mu.Lock()
-	defer lf.mu.Unlock()
 	delete(lf.receivers, receiverID)
+	changed := lf.recomputeWanted()
+	wanted := lf.wanted
 	lf.debugLog("removed receiver %s (remaining=%d)", receiverID, len(lf.receivers))
+	lf.mu.Unlock()
+
+	lf.notifyIf(changed)
+	return wanted, changed
+}
+
+// SetDemand records how big a receiver draws this track. It returns the new wanted size,
+// whether that changed, and whether this receiver just went from hidden to watching.
+func (lf *LayerForwarder) SetDemand(receiverID string, d Demand) (wanted Wanted, changed, woke bool) {
+	lf.mu.Lock()
+	rs := lf.receivers[receiverID]
+	if rs == nil {
+		rs = &ReceiverState{}
+		lf.receivers[receiverID] = rs
+	}
+	woke = rs.reported && rs.demand.hidden() && !d.hidden()
+	rs.demand = d
+	rs.reported = true
+	changed = lf.recomputeWanted()
+	wanted = lf.wanted
+	lf.mu.Unlock()
+
+	lf.notifyIf(changed)
+	return wanted, changed, woke
+}
+
+// Wanted returns the current largest demand across receivers.
+func (lf *LayerForwarder) Wanted() Wanted {
+	lf.mu.RLock()
+	defer lf.mu.RUnlock()
+	return lf.wanted
+}
+
+// OnWantedChange registers the one callback told when Wanted changes. It runs outside the
+// forwarder's lock, so it should hand off rather than write to a socket.
+func (lf *LayerForwarder) OnWantedChange(f func()) {
+	lf.mu.Lock()
+	lf.onWanted = f
+	lf.mu.Unlock()
+}
+
+// RequestKeyframe asks the sender for a keyframe, for a viewer that has nothing to decode from.
+func (lf *LayerForwarder) RequestKeyframe() {
+	if lf.senderPC == nil {
+		return
+	}
+	_ = lf.senderPC.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: lf.remoteSSRC}})
+}
+
+// recomputeWanted must be called with mu held for writing.
+func (lf *LayerForwarder) recomputeWanted() bool {
+	var w Wanted
+	for _, rs := range lf.receivers {
+		switch {
+		case !rs.reported:
+			w.Unknown++
+		case !rs.demand.hidden():
+			w.Watchers++
+			w.Width = max(w.Width, rs.demand.Width)
+			w.Height = max(w.Height, rs.demand.Height)
+			w.FPS = max(w.FPS, rs.demand.FPS)
+		}
+	}
+	changed := w != lf.wanted
+	lf.wanted = w
+	return changed
+}
+
+func (lf *LayerForwarder) notifyIf(changed bool) {
+	if !changed {
+		return
+	}
+	lf.mu.RLock()
+	f := lf.onWanted
+	lf.mu.RUnlock()
+	if f != nil {
+		f()
+	}
 }
 
 // SetMaxTemporalLayer updates the temporal layer cap for a receiver.
@@ -165,7 +278,9 @@ func (lf *LayerForwarder) run() {
 	}()
 
 	buf := make([]byte, 1500)
+	shifted := make([]byte, 1500)
 	var header rtp.Header
+	var lastTimestamp uint32
 
 	for {
 		select {
@@ -191,9 +306,23 @@ func (lf *LayerForwarder) run() {
 			temporalID = lf.extractTemporalID(&header)
 		}
 
+		frameStart := unmarshalErr == nil && header.Timestamp != lastTimestamp
+		if unmarshalErr == nil {
+			lastTimestamp = header.Timestamp
+		}
+
+		// Only run() touches hidden and seqShift, and writers of the rest take the full lock.
 		lf.mu.RLock()
 		for _, rs := range lf.receivers {
 			if !rs.active || rs.Track == nil {
+				continue
+			}
+
+			if frameStart {
+				rs.hidden = rs.reported && rs.demand.hidden()
+			}
+			if rs.hidden && unmarshalErr == nil {
+				rs.seqShift++
 				continue
 			}
 
@@ -201,7 +330,13 @@ func (lf *LayerForwarder) run() {
 				continue
 			}
 
-			if _, writeErr := rs.Track.Write(raw); writeErr != nil {
+			out := raw
+			if rs.seqShift != 0 && unmarshalErr == nil {
+				out = shifted[:n]
+				copy(out, raw)
+				binary.BigEndian.PutUint16(out[2:4], header.SequenceNumber-rs.seqShift)
+			}
+			if _, writeErr := rs.Track.Write(out); writeErr != nil {
 				continue
 			}
 		}

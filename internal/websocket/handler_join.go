@@ -135,6 +135,10 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 				h.debugLog("🚪 Client %s leaving room '%s'", clientID, joinData.RoomID)
 				h.roomManager.RemovePeerFromRoom(joinData.RoomID, clientID)
 				h.webrtcManager.RemovePeerFromRoom(joinData.RoomID, clientID)
+				// Its demand goes too, which can let a sender shrink or pause.
+				for _, lf := range h.trackManager.GetForwardersInRoom(joinData.RoomID) {
+					lf.RemoveReceiver(clientID)
+				}
 				h.coordinator.SignalPeerConnectionsInRoom(joinData.RoomID)
 				return nil
 			})
@@ -265,6 +269,12 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 					return nil
 				})
 			}()
+
+			if t.Kind() == webrtc.RTPCodecTypeVideo {
+				if lf, ok := h.trackManager.GetForwarder(roomID, t.ID()); ok {
+					h.watchVideoDemand(lf, conn, midOf(peerConnection, receiver))
+				}
+			}
 
 			// The sender's reports only reach the interceptors when read. Unread, the receiver
 			// reports we send back carry no LSR, and the browser gets no round-trip time from them.
