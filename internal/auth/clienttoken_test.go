@@ -192,3 +192,44 @@ func TestTheV2NoCapabilitiesVectorTheServerPins(t *testing.T) {
 		t.Fatalf("v2 empty-capability vector drifted:\n got %s\nwant %s", got, want)
 	}
 }
+
+// ── Video (GRYT-1417) ────────────────────────────────────────────────
+
+// An old server's v2 token has no marker, and a v1 token has nothing at all. Both keep the
+// video they had, or a new SFU would turn off every camera behind a server that lagged.
+func TestATokenWithoutTheMarkerMayShareVideo(t *testing.T) {
+	v2 := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), []string{CapSpeak})
+	for name, tok := range map[string]string{"v1": validToken(t), "v2": v2} {
+		claims, err := Verify(secret, tok, room, user, time.Now())
+		if err != nil {
+			t.Fatalf("%s: verify = %v, want nil", name, err)
+		}
+		if !claims.MayShare(CapShareVideo) || !claims.MayShare(CapShareScreen) {
+			t.Fatalf("%s: a token without %q must allow video, got %v", name, CapVideoChecked, claims.Capabilities)
+		}
+	}
+}
+
+func TestTheMarkerMakesAMissingVideoCapabilityADenial(t *testing.T) {
+	tok := SignV2(secret, user, room, "n", time.Now().Add(time.Minute), []string{CapSpeak, CapVideoChecked, CapShareScreen})
+	claims, err := Verify(secret, tok, room, user, time.Now())
+	if err != nil {
+		t.Fatalf("verify = %v, want nil", err)
+	}
+	if claims.MayShare(CapShareVideo) {
+		t.Fatalf("want %q withheld, got %v", CapShareVideo, claims.Capabilities)
+	}
+	if !claims.MayShare(CapShareScreen) {
+		t.Fatalf("want %q granted, got %v", CapShareScreen, claims.Capabilities)
+	}
+}
+
+// What a member allowed everything gets from a GRYT-1417 server, in the server's order.
+func TestTheV2VideoVectorTheServerPins(t *testing.T) {
+	caps := []string{CapSpeak, CapVideoChecked, CapShareVideo, CapShareScreen}
+	got := SignV2(vectorSecret, vectorUser, vectorRoom, vectorNonce, time.UnixMilli(vectorExpiry), caps)
+	want := "v2.dXNlci1hYmN8cm9vbS14eXp8MTc4ODAwMDAwMDAwMHxub25jZS0xfHNwZWFrLHZpZGVvX2NoZWNrZWQsc2hhcmVfdmlkZW8sc2hhcmVfc2NyZWVu.Qx-j1KxaPI1WbjnTkvxx3duSBx4WMK3Jg03pQIZZZ2g"
+	if got != want {
+		t.Fatalf("v2 video vector drifted:\n got %s\nwant %s", got, want)
+	}
+}
