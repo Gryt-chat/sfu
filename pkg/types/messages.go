@@ -63,6 +63,16 @@ type AudioControlData struct {
 	IsDeafened     bool   `json:"is_deafened"`
 }
 
+// HiddenPeersData is sent by the server with the users whose media UserID must not get:
+// the people they blocked. It replaces the last list sent for them in that room.
+type HiddenPeersData struct {
+	RoomID         string   `json:"room_id"`
+	UserID         string   `json:"user_id"`
+	ServerID       string   `json:"server_id"`
+	ServerPassword string   `json:"server_password"`
+	Hidden         []string `json:"hidden"`
+}
+
 // SetLayerData lets a client manually set the max temporal layer for a track.
 type SetLayerData struct {
 	TrackID          string `json:"track_id"`
@@ -111,6 +121,7 @@ const (
 	EventKeepAlive        = "keep_alive"
 	EventDisconnectUser   = "disconnect_user"
 	EventUserAudioControl = "user_audio_control"
+	EventUserHiddenPeers  = "user_hidden_peers"
 	EventPeerJoined       = "peer_joined"
 	EventPeerLeft         = "peer_left"
 	EventRenegotiate      = "renegotiate"
