@@ -117,6 +117,9 @@ type RoomJoinedData struct {
 	// CallAloneTimeoutSeconds is SFU_CALL_ALONE_TIMEOUT in seconds, zero meaning the sweep is
 	// off. Sent so the client stops carrying its own copy of a default an operator can change.
 	CallAloneTimeoutSeconds int `json:"call_alone_timeout_seconds"`
+
+	// MaxIngestKbps is SFU_MAX_INGEST_KBPS. The client keeps its uplink under it; the SFU doesn't enforce it.
+	MaxIngestKbps int `json:"max_ingest_kbps,omitempty"`
 }
 
 // Supported WebSocket message events

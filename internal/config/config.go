@@ -83,6 +83,9 @@ type Config struct {
 	// How long somebody may be alone in a call before it ends. Zero turns it
 	// off and leaves the room up until the peer goes on its own.
 	CallAloneTimeout time.Duration
+
+	// The most one peer should send, in kbps, told to clients in room_joined. Zero is no cap.
+	MaxIngestKbps int
 }
 
 // Load reads configuration from environment variables
@@ -182,6 +185,11 @@ func Load() (*Config, error) {
 	// call stayed up until somebody closed it says so without a rebuild.
 	callAloneTimeout := durationSecondsFromEnv("SFU_CALL_ALONE_TIMEOUT", DefaultCallAloneTimeout)
 
+	maxIngestKbps, _ := strconv.Atoi(os.Getenv("SFU_MAX_INGEST_KBPS"))
+	if maxIngestKbps < 0 {
+		maxIngestKbps = 0
+	}
+
 	// A timeout shorter than two ping intervals disconnects healthy peers, so it is raised
 	// rather than refused: an SFU that will not boot over a small number is worse.
 	if pingInterval > 0 && pongTimeout < 2*pingInterval {
@@ -265,6 +273,7 @@ func Load() (*Config, error) {
 		PongTimeout:        pongTimeout,
 
 		CallAloneTimeout: callAloneTimeout,
+		MaxIngestKbps:    maxIngestKbps,
 	}, nil
 }
 
