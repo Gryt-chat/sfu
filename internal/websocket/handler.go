@@ -551,6 +551,7 @@ func (h *Handler) sendRoomJoined(conn *ThreadSafeWriter, message string) {
 		payload, err := json.Marshal(types.RoomJoinedData{
 			Message:                 message,
 			CallAloneTimeoutSeconds: int(h.config.CallAloneTimeout / time.Second),
+			MaxIngestKbps:           h.config.MaxIngestKbps,
 		})
 		if err != nil {
 			return err

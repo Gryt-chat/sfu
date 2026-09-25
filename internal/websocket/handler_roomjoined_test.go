@@ -61,3 +61,29 @@ func TestRoomJoinedSaysZeroWhenTheSweepIsOff(t *testing.T) {
 		t.Fatalf("SFU_CALL_ALONE_TIMEOUT=0 has to reach the client as 0, got %d", joined.CallAloneTimeoutSeconds)
 	}
 }
+
+func TestRoomJoinedCarriesTheIngestCap(t *testing.T) {
+	for _, tc := range []struct {
+		kbps    int
+		present bool
+	}{{1500, true}, {0, false}} {
+		h := &Handler{config: &config.Config{MaxIngestKbps: tc.kbps}}
+		serverConn, clientConn := newTestSocketPair(t)
+
+		h.sendRoomJoined(serverConn, "Successfully joined room")
+
+		message, ok := readNextMessage(t, clientConn, time.Second)
+		if !ok {
+			t.Fatal("no room_joined arrived")
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(message.Data), &raw); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		got, present := raw["max_ingest_kbps"]
+		// No cap is no key: a client reading 0 as a cap would send nothing.
+		if present != tc.present || (present && got != float64(tc.kbps)) {
+			t.Fatalf("SFU_MAX_INGEST_KBPS=%d reached the client as %v (present %v)", tc.kbps, got, present)
+		}
+	}
+}
