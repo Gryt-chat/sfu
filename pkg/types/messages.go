@@ -73,6 +73,16 @@ type HiddenPeersData struct {
 	Hidden         []string `json:"hidden"`
 }
 
+// UserCapabilitiesData replaces what a connected member may send, as the server works it
+// out now. It is the join token's capability list, sent again after a permission change.
+type UserCapabilitiesData struct {
+	RoomID         string   `json:"room_id"`
+	UserID         string   `json:"user_id"`
+	ServerID       string   `json:"server_id"`
+	ServerPassword string   `json:"server_password"`
+	Capabilities   []string `json:"capabilities"`
+}
+
 // SetLayerData lets a client manually set the max temporal layer for a track.
 type SetLayerData struct {
 	TrackID          string `json:"track_id"`
@@ -122,6 +132,7 @@ const (
 	EventDisconnectUser   = "disconnect_user"
 	EventUserAudioControl = "user_audio_control"
 	EventUserHiddenPeers  = "user_hidden_peers"
+	EventUserCapabilities = "user_capabilities"
 	EventPeerJoined       = "peer_joined"
 	EventPeerLeft         = "peer_left"
 	EventRenegotiate      = "renegotiate"

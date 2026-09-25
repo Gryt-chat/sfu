@@ -1,6 +1,7 @@
 package room
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -566,6 +567,19 @@ func (m *Manager) ValidateServerCredentials(serverID, serverPassword string) boo
 	defer m.mutex.RUnlock()
 	pw, exists := m.registeredServers[serverID]
 	return exists && pw == serverPassword
+}
+
+// ServerOwnsRoom checks the server's credentials and that the room is one it registered, so
+// one server on a shared SFU cannot change what another's members may do.
+func (m *Manager) ServerOwnsRoom(serverID, serverPassword, roomID string) bool {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	pw, exists := m.registeredServers[serverID]
+	if !exists || pw == "" || subtle.ConstantTimeCompare([]byte(pw), []byte(serverPassword)) != 1 {
+		return false
+	}
+	room, exists := m.rooms[roomID]
+	return exists && room.ServerID == serverID
 }
 
 // SetUserDeafened updates the deafen state for a user in a room.

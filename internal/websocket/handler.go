@@ -87,6 +87,7 @@ type Handler struct {
 	webrtcManager *peerManager.Manager
 	roomManager   *room.Manager
 	coordinator   Coordinator
+	live          livePeers
 }
 
 // NewHandler creates a new WebSocket handler
@@ -213,6 +214,8 @@ func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string
 					return h.handleUserAudioControl(message.Data)
 				case types.EventUserHiddenPeers:
 					return h.handleUserHiddenPeers(message.Data)
+				case types.EventUserCapabilities:
+					return h.handleUserCapabilities(message.Data)
 				case types.EventSyncRequest:
 					return h.handleSyncRequest(conn, message.Data)
 				case types.EventKeepAlive:
