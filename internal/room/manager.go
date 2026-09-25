@@ -38,6 +38,9 @@ type Room struct {
 	CreatedAt       time.Time
 	LastActivity    time.Time
 	mutex           sync.RWMutex
+	// userID -> userIDs whose media they don't get. Kept when the peer goes: the server
+	// only sends it on a join, and a reconnect isn't one. Made on first use.
+	HiddenPeers map[string]map[string]bool
 }
 
 // Manager handles room creation and management
@@ -604,4 +607,57 @@ func (m *Manager) IsUserDeafened(roomID, clientID string) bool {
 		return false
 	}
 	return room.DeafenedUsers[userID]
+}
+
+// SetHiddenPeers replaces the users whose media userID doesn't get in this room.
+func (m *Manager) SetHiddenPeers(roomID, userID string, hidden []string) error {
+	m.mutex.RLock()
+	room, exists := m.rooms[roomID]
+	m.mutex.RUnlock()
+	if !exists {
+		return fmt.Errorf("room %s does not exist", roomID)
+	}
+
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
+
+	if room.HiddenPeers == nil {
+		room.HiddenPeers = make(map[string]map[string]bool)
+	}
+	if len(hidden) == 0 {
+		delete(room.HiddenPeers, userID)
+		return nil
+	}
+	set := make(map[string]bool, len(hidden))
+	for _, id := range hidden {
+		set[id] = true
+	}
+	room.HiddenPeers[userID] = set
+	m.debugLog("🙈 User '%s' in room '%s' hides %d users", userID, roomID, len(set))
+	return nil
+}
+
+// HiddenSendersFor returns the peer connections whose tracks the peer clientID must not get.
+func (m *Manager) HiddenSendersFor(roomID, clientID string) map[*webrtc.PeerConnection]bool {
+	m.mutex.RLock()
+	room, exists := m.rooms[roomID]
+	m.mutex.RUnlock()
+	if !exists {
+		return nil
+	}
+
+	room.mutex.RLock()
+	defer room.mutex.RUnlock()
+
+	hidden := room.HiddenPeers[room.UserIDs[clientID]]
+	if len(hidden) == 0 {
+		return nil
+	}
+	senders := make(map[*webrtc.PeerConnection]bool)
+	for otherClientID, otherUserID := range room.UserIDs {
+		if hidden[otherUserID] && room.PeerConnections[otherClientID] != nil {
+			senders[room.PeerConnections[otherClientID]] = true
+		}
+	}
+	return senders
 }

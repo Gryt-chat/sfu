@@ -157,6 +157,7 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 	}
 
 	isDeafened := c.roomManager.IsUserDeafened(roomID, clientID)
+	hiddenSenders := c.roomManager.HiddenSendersFor(roomID, clientID)
 
 	// Build the set of track IDs this peer should receive.
 	wantedTrackIDs := make(map[string]bool, len(tracks))
@@ -166,6 +167,11 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		}
 		if isDeafened && t.Kind() == webrtc.RTPCodecTypeAudio {
 			continue
+		}
+		if len(hiddenSenders) > 0 {
+			if info, ok := c.trackManager.GetSenderInfo(roomID, id); ok && hiddenSenders[info.PC] {
+				continue
+			}
 		}
 		wantedTrackIDs[id] = true
 	}

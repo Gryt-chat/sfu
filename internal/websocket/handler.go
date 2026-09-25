@@ -211,6 +211,8 @@ func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string
 					return h.handleDisconnectUser(message.Data)
 				case types.EventUserAudioControl:
 					return h.handleUserAudioControl(message.Data)
+				case types.EventUserHiddenPeers:
+					return h.handleUserHiddenPeers(message.Data)
 				case types.EventSyncRequest:
 					return h.handleSyncRequest(conn, message.Data)
 				case types.EventKeepAlive:
@@ -294,6 +296,28 @@ func (h *Handler) handleUserAudioControl(data string) error {
 
 	if err := h.roomManager.SetUserDeafened(req.RoomID, req.UserID, req.IsDeafened); err != nil {
 		h.debugLog("❌ user_audio_control: failed to set deafen state: %v", err)
+		return nil
+	}
+
+	go h.coordinator.SignalPeerConnectionsInRoom(req.RoomID)
+	return nil
+}
+
+// handleUserHiddenPeers processes a server request to stop forwarding some users' media to a user.
+func (h *Handler) handleUserHiddenPeers(data string) error {
+	var req types.HiddenPeersData
+	if err := recovery.SafeJSONUnmarshal([]byte(data), &req); err != nil {
+		h.debugLog("❌ Error unmarshalling user_hidden_peers data: %v", err)
+		return err
+	}
+
+	if !h.roomManager.ValidateServerCredentials(req.ServerID, req.ServerPassword) {
+		h.debugLog("❌ user_hidden_peers: invalid credentials for server '%s'", req.ServerID)
+		return nil
+	}
+
+	if err := h.roomManager.SetHiddenPeers(req.RoomID, req.UserID, req.Hidden); err != nil {
+		h.debugLog("❌ user_hidden_peers: %v", err)
 		return nil
 	}
 
