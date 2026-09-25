@@ -51,7 +51,7 @@ func TestVideoDemandGatesTheViewerAndTellsTheSender(t *testing.T) {
 		t.Fatalf("create SFU peer: %v", err)
 	}
 	t.Cleanup(func() { _ = sfu.Close() })
-	h.setupWebRTCHandlers(sfu, conn, "sender", "room-1", auth.Claims{Capabilities: []string{auth.CapSpeak}})
+	h.setupWebRTCHandlers(sfu, conn, "sender", "room-1", auth.NewLive(auth.Claims{Capabilities: []string{auth.CapSpeak}}))
 
 	sender, err := loopbackAPI().NewPeerConnection(webrtc.Configuration{})
 	if err != nil {

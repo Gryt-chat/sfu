@@ -98,7 +98,7 @@ func publishMicAndCamera(t *testing.T, claims auth.Claims) []webrtc.RTPCodecType
 		t.Fatalf("create SFU peer: %v", err)
 	}
 	t.Cleanup(func() { _ = sfu.Close() })
-	h.setupWebRTCHandlers(sfu, conn, "client-a", "room-1", claims)
+	h.setupWebRTCHandlers(sfu, conn, "client-a", "room-1", auth.NewLive(claims))
 
 	client, err := loopbackAPI().NewPeerConnection(webrtc.Configuration{})
 	if err != nil {

@@ -192,9 +192,12 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 			}
 
 			senderCount++
-			existingSenders[sender.Track().ID()] = true
+			stale := c.fedByNoForwarder(roomID, clientID, sender.Track())
+			if !stale {
+				existingSenders[sender.Track().ID()] = true
+			}
 
-			if !wantedTrackIDs[sender.Track().ID()] {
+			if !wantedTrackIDs[sender.Track().ID()] || stale {
 				c.debugLog("🗑️  Removing obsolete sender track %s from peer %s", sender.Track().ID(), clientID)
 				if err := peerConnection.RemoveTrack(sender); err != nil {
 					c.debugLog("❌ Error removing sender track: %v", err)
@@ -316,6 +319,13 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		}
 		return fmt.Errorf("invalid WebSocket connection type for client %s", clientID)
 	})
+}
+
+// fedByNoForwarder reports a sender whose track the room's forwarder for that id no longer
+// feeds. A track taken away and given back gets a new forwarder under the same id (GRYT-1426).
+func (c *Coordinator) fedByNoForwarder(roomID, clientID string, sent webrtc.TrackLocal) bool {
+	lf, ok := c.trackManager.GetForwarder(roomID, sent.ID())
+	return ok && lf.GetReceiverTrack(clientID) != sent
 }
 
 // OnTrackAddedToRoom should be called when a new track is added to a room

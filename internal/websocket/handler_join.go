@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 
@@ -113,6 +114,12 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 			})
 		}()
 
+		// Findable before AddPeerToRoom tells the server this peer is here: the server sends
+		// capabilities on peer_joined, and one arriving earlier would find nobody.
+		live := auth.NewLive(claims)
+		h.live.add(clientID, joinData.RoomID, joinData.UserID, live)
+		defer h.live.remove(clientID)
+
 		// Add peer to room managers with recovery
 		err = recovery.SafeExecuteWithContext("WEBSOCKET", "ADD_PEER_TO_ROOM", clientID, joinData.RoomID, "Adding peer to room", func() error {
 			if err := h.roomManager.AddPeerToRoom(joinData.RoomID, clientID, joinData.UserID, peerConnection, conn); err != nil {
@@ -149,7 +156,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		h.sendRoomJoined(conn, "Successfully joined room")
 
 		// Set up WebRTC event handlers with recovery
-		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, claims)
+		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, live)
 
 		// Signal the new peer connection to start the negotiation process
 		recovery.SafeExecuteWithContext("WEBSOCKET", "SIGNAL_PEER_CONNECTIONS", clientID, joinData.RoomID, "Starting peer signaling", func() error {
@@ -165,7 +172,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 // setupWebRTCHandlers sets up WebRTC event handlers with crash protection. Exactly one
 // OnConnectionStateChange registration: pion's Store replaces, so a second turns the first off.
-func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, claims auth.Claims) {
+func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, conn *ThreadSafeWriter, clientID, roomID string, live *auth.Live) {
 	// Closed once, when the peer connection reaches a state it cannot come back from. Every
 	// track's cleanup waits on this, so they all fire rather than only the last registered.
 	closed := make(chan struct{})
@@ -241,55 +248,116 @@ func (h *Handler) setupWebRTCHandlers(peerConnection *webrtc.PeerConnection, con
 		markClosed()
 	}
 
-	// The LayerForwarder created inside AddTrackToRoom does all RTP forwarding, so there is
-	// no separate goroutine. This blocks until the remote track ends, so cleanup fires then.
+	// Each track alternates between held and forwarded for as long as the peer connection
+	// lives, as the server changes what this member may send (GRYT-1426).
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		recovery.SafeExecuteWithContext("WEBRTC", "TRACK_RECEIVED", clientID, roomID, fmt.Sprintf("Track: %s", t.Kind().String()), func() error {
 			h.debugLog("🎵 Incoming track from %s in room '%s': %s (SSRC: %d)", clientID, roomID, t.Kind().String(), t.SSRC())
 
-			// Denied on this channel: drop the track rather than forward it. This is the only
-			// place the gate can be real — a client check is decoration.
-			if denied := refusedBy(claims, peerConnection, receiver, t.Kind()); denied != "" {
-				h.debugLog("🔇 Refusing %s track from %s in room '%s': token does not grant %q", t.Kind().String(), clientID, roomID, denied)
-				metrics.TracksRefused.Inc()
-				return nil
-			}
-
-			trackLocal := h.trackManager.AddTrackToRoom(roomID, t, peerConnection)
-			if trackLocal == nil {
-				h.debugLog("❌ Failed to create local track for %s", clientID)
-				return fmt.Errorf("failed to create local track")
-			}
-
-			defer func() {
-				recovery.SafeExecuteWithContext("WEBRTC", "CLEANUP_TRACK", clientID, roomID, "Cleaning up track", func() error {
-					h.trackManager.RemoveTrackFromRoom(roomID, trackLocal)
-					h.coordinator.OnTrackRemovedFromRoom(roomID)
-					metrics.TracksActive.Dec()
+			drainingRTCP := false
+			for {
+				if !h.holdWhileRefused(t, peerConnection, receiver, live, closed, clientID, roomID) {
 					return nil
-				})
-			}()
-
-			if t.Kind() == webrtc.RTPCodecTypeVideo {
-				if lf, ok := h.trackManager.GetForwarder(roomID, t.ID()); ok {
-					h.watchVideoDemand(lf, conn, midOf(peerConnection, receiver))
+				}
+				// The sender's reports only reach the interceptors when read. Unread, the receiver
+				// reports we send back carry no LSR, and the browser gets no round-trip time.
+				if !drainingRTCP {
+					go drainRTCP(receiver)
+					drainingRTCP = true
+				}
+				if !h.forwardWhileAllowed(t, peerConnection, receiver, conn, live, closed, clientID, roomID) {
+					return nil
 				}
 			}
-
-			// The sender's reports only reach the interceptors when read. Unread, the receiver
-			// reports we send back carry no LSR, and the browser gets no round-trip time from them.
-			go drainRTCP(receiver)
-
-			h.debugLog("🎵 Created local track with LayerForwarder for %s", clientID)
-			metrics.TracksActive.Inc()
-			h.coordinator.OnTrackAddedToRoom(roomID)
-
-			// Block until the peer connection closes, so the deferred cleanup runs at the
-			// right time. On the shared channel — see the note on this function.
-			<-closed
-			return nil
 		})
 	})
+}
+
+// holdPoll is how often a held track looks for a changed capability while nothing arrives.
+// It bounds how long a re-granted track waits, and costs a timer per held track.
+const holdPoll = 100 * time.Millisecond
+
+// holdWhileRefused reads and drops a track until the claims let it through, which returns
+// true, or the peer goes, false. Read so what is let through later is live, not a backlog.
+func (h *Handler) holdWhileRefused(t *webrtc.TrackRemote, pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver, live *auth.Live, closed <-chan struct{}, clientID, roomID string) bool {
+	buf := make([]byte, 1500)
+	held := false
+	defer func() {
+		if held {
+			_ = t.SetReadDeadline(time.Time{})
+		}
+	}()
+	for {
+		claims, changed := live.Snapshot()
+		denied := refusedBy(claims, pc, receiver, t.Kind())
+		if denied == "" {
+			return true
+		}
+		// Denied on this channel: drop the track rather than forward it. This is the only
+		// place the gate can be real — a client check is decoration.
+		if !held {
+			h.debugLog("🔇 Refusing %s track from %s in room '%s': not granted %q", t.Kind().String(), clientID, roomID, denied)
+			metrics.TracksRefused.Inc()
+			held = true
+		}
+		select {
+		case <-closed:
+			return false
+		case <-changed:
+			continue
+		default:
+		}
+		_ = t.SetReadDeadline(time.Now().Add(holdPoll))
+		if _, _, err := t.Read(buf); err != nil && !isReadDeadline(err) {
+			return false
+		}
+	}
+}
+
+// forwardWhileAllowed puts the track in the room until the claims take it away, which
+// returns true, or the peer goes, false. Either way it leaves the room before returning.
+func (h *Handler) forwardWhileAllowed(t *webrtc.TrackRemote, pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver, conn *ThreadSafeWriter, live *auth.Live, closed <-chan struct{}, clientID, roomID string) bool {
+	// The LayerForwarder created inside AddTrackToRoom does all RTP forwarding, so there is
+	// no separate goroutine.
+	trackLocal := h.trackManager.AddTrackToRoom(roomID, t, pc)
+	if trackLocal == nil {
+		h.debugLog("❌ Failed to create local track for %s", clientID)
+		return false
+	}
+
+	defer func() {
+		recovery.SafeExecuteWithContext("WEBRTC", "CLEANUP_TRACK", clientID, roomID, "Cleaning up track", func() error {
+			h.trackManager.RemoveTrackFromRoom(roomID, trackLocal)
+			h.coordinator.OnTrackRemovedFromRoom(roomID)
+			metrics.TracksActive.Dec()
+			return nil
+		})
+	}()
+
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		if lf, ok := h.trackManager.GetForwarder(roomID, t.ID()); ok {
+			h.watchVideoDemand(lf, conn, midOf(pc, receiver))
+		}
+	}
+
+	h.debugLog("🎵 Created local track with LayerForwarder for %s", clientID)
+	metrics.TracksActive.Inc()
+	h.coordinator.OnTrackAddedToRoom(roomID)
+
+	// Until the peer connection closes (the shared channel, see setupWebRTCHandlers), or the
+	// server takes the capability away.
+	for {
+		claims, changed := live.Snapshot()
+		if denied := refusedBy(claims, pc, receiver, t.Kind()); denied != "" {
+			h.debugLog("🔇 Cutting %s track from %s in room '%s': %q taken away", t.Kind().String(), clientID, roomID, denied)
+			return true
+		}
+		select {
+		case <-closed:
+			return false
+		case <-changed:
+		}
+	}
 }
 
 // drainRTCP reads a receiver's incoming RTCP until the receiver stops, discarding it once
