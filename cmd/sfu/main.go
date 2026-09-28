@@ -463,10 +463,16 @@ func describe(ip net.IP, port string, names map[string]string) string {
 	return fmt.Sprintf("%s:%s", ip, port)
 }
 
+// srtpReplayWindow is how far behind the newest packet a retransmit can arrive and still count.
+const srtpReplayWindow = 1024
+
 // newSettingEngine builds the ICE half of the WebRTC API from the config. Extracted so a
 // test can gather against it: a wrong answer here looks right until somebody reads an SDP.
 func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
 	se := pion.SettingEngine{}
+	// Pion's 64-packet window threw away retransmits of a big keyframe, so the NACKs never
+	// stopped and a share started on a thin link never showed (GRYT-1571). Chrome uses 1024.
+	se.SetSRTPReplayProtectionWindow(srtpReplayWindow)
 
 	// All ICE traffic flows over one UDP port: far easier through a firewall than a range,
 	// and networks that drop UDP on high ports let a recognised one through.
