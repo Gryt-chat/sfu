@@ -18,7 +18,7 @@ func TestRoomJoinedCarriesTheCallAloneTimeout(t *testing.T) {
 	h := &Handler{config: &config.Config{CallAloneTimeout: 5 * time.Minute}}
 	serverConn, clientConn := newTestSocketPair(t)
 
-	h.sendRoomJoined(serverConn, "Successfully joined room")
+	h.sendRoomJoined(serverConn, "Successfully joined room", nil)
 
 	message, ok := readNextMessage(t, clientConn, time.Second)
 	if !ok {
@@ -44,7 +44,7 @@ func TestRoomJoinedSaysZeroWhenTheSweepIsOff(t *testing.T) {
 	h := &Handler{config: &config.Config{CallAloneTimeout: 0}}
 	serverConn, clientConn := newTestSocketPair(t)
 
-	h.sendRoomJoined(serverConn, "Successfully joined room")
+	h.sendRoomJoined(serverConn, "Successfully joined room", nil)
 
 	message, ok := readNextMessage(t, clientConn, time.Second)
 	if !ok {
@@ -70,7 +70,7 @@ func TestRoomJoinedCarriesTheIngestCap(t *testing.T) {
 		h := &Handler{config: &config.Config{MaxIngestKbps: tc.kbps}}
 		serverConn, clientConn := newTestSocketPair(t)
 
-		h.sendRoomJoined(serverConn, "Successfully joined room")
+		h.sendRoomJoined(serverConn, "Successfully joined room", nil)
 
 		message, ok := readNextMessage(t, clientConn, time.Second)
 		if !ok {
@@ -84,6 +84,39 @@ func TestRoomJoinedCarriesTheIngestCap(t *testing.T) {
 		// No cap is no key: a client reading 0 as a cap would send nothing.
 		if present != tc.present || (present && got != float64(tc.kbps)) {
 			t.Fatalf("SFU_MAX_INGEST_KBPS=%d reached the client as %v (present %v)", tc.kbps, got, present)
+		}
+	}
+}
+
+// The own voice transport (GRYT-1818): an offer rides on room_joined, and its absence is how a
+// client knows to stay on WebRTC.
+func TestRoomJoinedCarriesTheAudioTransportOffer(t *testing.T) {
+	for _, offer := range []*types.AudioTransportOffer{
+		{URLs: []string{"https://192.0.2.1:4433/voice"}, CertHash: "aGFzaA==", Ticket: "dGlja2V0"},
+		nil,
+	} {
+		h := &Handler{config: &config.Config{}}
+		serverConn, clientConn := newTestSocketPair(t)
+
+		h.sendRoomJoined(serverConn, "Successfully joined room", offer)
+
+		message, ok := readNextMessage(t, clientConn, time.Second)
+		if !ok {
+			t.Fatal("no room_joined arrived")
+		}
+		var joined types.RoomJoinedData
+		if err := json.Unmarshal([]byte(message.Data), &joined); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if offer == nil {
+			if joined.AudioTransport != nil {
+				t.Fatalf("no transport running, but room_joined offered one: %+v", joined.AudioTransport)
+			}
+			continue
+		}
+		if joined.AudioTransport == nil || joined.AudioTransport.Ticket != offer.Ticket ||
+			joined.AudioTransport.CertHash != offer.CertHash || joined.AudioTransport.URLs[0] != offer.URLs[0] {
+			t.Fatalf("offer did not reach the client intact: %+v", joined.AudioTransport)
 		}
 	}
 }

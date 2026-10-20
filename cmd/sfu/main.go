@@ -15,6 +15,7 @@ import (
 	pion "github.com/pion/webrtc/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"sfu-v2/internal/audiotransport"
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/readiness"
@@ -174,6 +175,23 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize WebSocket handler: %v", err)
+	}
+
+	// The own voice transport (GRYT-1818): clients reach it at the addresses WebRTC advertises.
+	switch {
+	case cfg.AudioTransportPort == 0:
+		log.Printf("🎙️ Audio transport off (AUDIO_TRANSPORT_PORT=0)")
+	case len(cfg.ICEAdvertiseIPs) == 0:
+		log.Printf("🎙️ Audio transport off: it needs ICE_ADVERTISE_IP to tell clients where to connect")
+	default:
+		audio := audiotransport.New(cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
+		recovery.SafeGoroutine("MAIN", "AUDIO_TRANSPORT", func() {
+			if err := audio.ListenAndServe(); err != nil {
+				log.Printf("❌ Audio transport stopped: %v", err)
+			}
+		})
+		wsHandler.SetAudioTransport(audio)
+		log.Printf("🎙️ Audio transport on UDP %d for %v", cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
 	}
 
 	// Start room cleanup routine with recovery
