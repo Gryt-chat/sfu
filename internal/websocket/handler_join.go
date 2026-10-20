@@ -447,5 +447,9 @@ func (h *Handler) audioOffer(clientID, roomID string) *types.AudioTransportOffer
 		log.Printf("[AUDIO] no offer for %s: %v", clientID, err)
 		return nil
 	}
-	return &types.AudioTransportOffer{URLs: o.URLs, CertHash: o.CertHash, Ticket: o.Ticket}
+	offer := &types.AudioTransportOffer{URLs: o.URLs, CertHash: o.CertHash, Ticket: o.Ticket}
+	if o.UDP != nil {
+		offer.UDP = &types.AudioUDPOffer{Addrs: o.UDP.Addrs, Session: o.UDP.Session, Key: o.UDP.Key}
+	}
+	return offer
 }

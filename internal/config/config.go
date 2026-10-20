@@ -91,6 +91,8 @@ type Config struct {
 
 	// AudioTransportPort is the UDP port of the own voice transport (GRYT-1818). 0 turns it off.
 	AudioTransportPort int
+	// AudioUDPPort is the native engine's plain UDP listener (GRYT-1822), next to the transport. 0, the default, is off.
+	AudioUDPPort int
 }
 
 // Load reads configuration from environment variables
@@ -124,6 +126,15 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("AUDIO_TRANSPORT_PORT=%q is not a UDP port (0 turns it off)", raw)
 		}
 		audioTransportPort = parsed
+	}
+
+	audioUDPPort := 0
+	if raw := strings.TrimSpace(os.Getenv("AUDIO_UDP_PORT")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 65535 {
+			return nil, fmt.Errorf("AUDIO_UDP_PORT=%q is not a UDP port (0 turns it off)", raw)
+		}
+		audioUDPPort = parsed
 	}
 
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
@@ -277,6 +288,7 @@ func Load() (*Config, error) {
 		ICEUDPMuxPort:      iceUDPMuxPort,
 		ICEAdvertiseIPs:    iceAdvertiseIPs,
 		AudioTransportPort: audioTransportPort,
+		AudioUDPPort:       audioUDPPort,
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,

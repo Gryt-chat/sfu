@@ -192,6 +192,14 @@ func main() {
 		})
 		wsHandler.SetAudioTransport(audio)
 		log.Printf("🎙️ Audio transport on UDP %d for %v", cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
+		if cfg.AudioUDPPort > 0 {
+			recovery.SafeGoroutine("MAIN", "AUDIO_UDP", func() {
+				if err := audio.ListenUDP(cfg.AudioUDPPort); err != nil {
+					log.Printf("❌ Native audio UDP stopped: %v", err)
+				}
+			})
+			log.Printf("🎙️ Native audio on UDP %d", cfg.AudioUDPPort)
+		}
 	}
 
 	// Start room cleanup routine with recovery
