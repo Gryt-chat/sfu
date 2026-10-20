@@ -35,6 +35,14 @@ func (p *livePeers) remove(clientID string) {
 	delete(p.peers, clientID)
 }
 
+// userOf is the user a connected peer joined as.
+func (p *livePeers) userOf(clientID string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	peer, ok := p.peers[clientID]
+	return peer.userID, ok
+}
+
 // set gives every peer of this user in this room new claims, and says how many it found.
 func (p *livePeers) set(roomID, userID string, claims auth.Claims) int {
 	p.mu.Lock()

@@ -171,6 +171,26 @@ func TestHubRejoinClosesTheOldSessionAndDropEndsIt(t *testing.T) {
 	}
 }
 
+func TestHubSaysWhoSendsUnderWhichIDOnJoinAndLeave(t *testing.T) {
+	h := newHub()
+	var got []map[string]uint32
+	h.changed = func(roomID string) {
+		if roomID == "r" {
+			got = append(got, h.senders(roomID))
+		}
+	}
+	a := h.join("r", "peer-a", &fakeSession{}, nil)
+	b := h.join("r", "peer-b", &fakeSession{}, nil)
+	h.leave(a)
+	h.leave(a) // already gone: no second change
+	if len(got) != 3 {
+		t.Fatalf("changes = %d, want 3: %v", len(got), got)
+	}
+	if got[1]["peer-a"] != a.id || got[1]["peer-b"] != b.id || len(got[2]) != 1 || got[2]["peer-b"] != b.id {
+		t.Fatalf("senders = %v", got)
+	}
+}
+
 func TestHandlerRefusesWithoutWebTransportOrTicket(t *testing.T) {
 	s := New(0, []string{"203.0.113.7"})
 	get := httptest.NewRecorder()
