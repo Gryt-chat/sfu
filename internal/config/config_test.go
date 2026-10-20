@@ -547,3 +547,16 @@ func TestAudioTransportPort(t *testing.T) {
 		}
 	}
 }
+
+func TestAudioUDPPortIsOffUnlessSet(t *testing.T) {
+	for value, want := range map[string]int{"": 0, "0": 0, "4434": 4434} {
+		t.Setenv("AUDIO_UDP_PORT", value)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("%q: %v", value, err)
+		}
+		if cfg.AudioUDPPort != want {
+			t.Fatalf("AUDIO_UDP_PORT=%q gave %d, want %d", value, cfg.AudioUDPPort, want)
+		}
+	}
+}

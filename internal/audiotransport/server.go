@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
@@ -27,6 +28,8 @@ type Offer struct {
 	URLs     []string `json:"urls"`
 	CertHash string   `json:"certHash"`
 	Ticket   string   `json:"ticket"`
+	// The native engine's plain UDP, when the listener runs (GRYT-1822).
+	UDP *UDPOffer `json:"udp,omitempty"`
 }
 
 type Server struct {
@@ -36,6 +39,9 @@ type Server struct {
 	tickets *tickets
 	hub     *hub
 	h3      *http3.Server
+
+	mu  sync.Mutex
+	udp *udpListener
 }
 
 // New listens on UDP port and tells clients to reach it at each of hosts (the SFU's public addresses).
@@ -87,11 +93,28 @@ func (s *Server) Offer(peerID, roomID string) (Offer, error) {
 	for _, h := range s.hosts {
 		urls = append(urls, fmt.Sprintf("https://%s/audio", net.JoinHostPort(h, strconv.Itoa(s.port))))
 	}
-	return Offer{URLs: urls, CertHash: hash, Ticket: ticket}, nil
+	offer := Offer{URLs: urls, CertHash: hash, Ticket: ticket}
+	s.mu.Lock()
+	u := s.udp
+	s.mu.Unlock()
+	if u != nil {
+		if offer.UDP, err = u.offer(peerID, roomID, time.Now()); err != nil {
+			return Offer{}, err
+		}
+	}
+	return offer, nil
 }
 
 // Drop ends a peer's audio session; called when it leaves voice.
-func (s *Server) Drop(peerID string) { s.hub.drop(peerID) }
+func (s *Server) Drop(peerID string) {
+	s.hub.drop(peerID)
+	s.mu.Lock()
+	u := s.udp
+	s.mu.Unlock()
+	if u != nil {
+		u.forget(peerID)
+	}
+}
 
 func isWebTransport(r *http.Request) bool {
 	return r.Method == http.MethodConnect && (r.Proto == "webtransport-h3" || r.Proto == "webtransport")

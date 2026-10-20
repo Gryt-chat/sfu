@@ -47,6 +47,7 @@ Every variable the SFU reads, and nothing it doesn't:
 | `DISABLE_STUN` | `false` | Stop discovering srflx candidates. Only safe with a direct, port-preserving path to the internet |
 | `ICE_UDP_MUX_PORT` | `3478` | The one UDP port all media flows over |
 | `AUDIO_TRANSPORT_PORT` | `4433` | UDP port for Gryt's own voice transport (WebTransport). Needs `ICE_ADVERTISE_IP`. `0` turns it off and clients stay on WebRTC |
+| `AUDIO_UDP_PORT` | `0` (off) | UDP port for Gryt's native voice engine (plain UDP, encrypted per packet). Needs the transport above. Nothing uses it until the native apps ship |
 | `ICE_ADVERTISE_IP` | — | Comma-separated IPs to advertise as host candidates, replacing the ones found on the interfaces |
 | `MAX_PEERS` | `200` | How many peers may be connected at once |
 | `SFU_PING_INTERVAL` | `30` | Seconds between WebSocket pings. `0` switches pinging and the read deadline off |

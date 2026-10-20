@@ -130,6 +130,15 @@ type AudioTransportOffer struct {
 	URLs     []string `json:"urls"`
 	CertHash string   `json:"certHash"`
 	Ticket   string   `json:"ticket"`
+	// The native engine's plain UDP, when AUDIO_UDP_PORT is set (GRYT-1822).
+	UDP *AudioUDPOffer `json:"udp,omitempty"`
+}
+
+// AudioUDPOffer is a session id and its key; a packet that opens with the key is the only proof needed.
+type AudioUDPOffer struct {
+	Addrs   []string `json:"addrs"`
+	Session uint32   `json:"session"`
+	Key     string   `json:"key"`
 }
 
 // Supported WebSocket message events
