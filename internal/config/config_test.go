@@ -534,3 +534,16 @@ func TestAMetricsHostThatIsNotAnAddressRefusesToLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestAudioTransportPort(t *testing.T) {
+	for value, want := range map[string]int{"": DefaultAudioTransportPort, "0": 0, "5443": 5443} {
+		t.Setenv("AUDIO_TRANSPORT_PORT", value)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("%q: %v", value, err)
+		}
+		if cfg.AudioTransportPort != want {
+			t.Fatalf("AUDIO_TRANSPORT_PORT=%q gave %d, want %d", value, cfg.AudioTransportPort, want)
+		}
+	}
+}

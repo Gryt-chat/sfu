@@ -153,7 +153,10 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 
 		// Send success message
 		h.debugLog("✅ Client %s successfully joined room '%s'", clientID, joinData.RoomID)
-		h.sendRoomJoined(conn, "Successfully joined room")
+		h.sendRoomJoined(conn, "Successfully joined room", h.audioOffer(clientID, joinData.RoomID))
+		if h.audio != nil {
+			defer h.audio.Drop(clientID)
+		}
 
 		// Set up WebRTC event handlers with recovery
 		h.setupWebRTCHandlers(peerConnection, conn, clientID, joinData.RoomID, live)
@@ -431,4 +434,18 @@ func refusedBy(claims auth.Claims, pc *webrtc.PeerConnection, receiver *webrtc.R
 		}
 	}
 	return ""
+}
+
+// audioOffer is the own voice transport's ticket for a joined client, or nil when it's off or failed.
+// A client without one stays on WebRTC audio, so a failure here costs latency, not the call.
+func (h *Handler) audioOffer(clientID, roomID string) *types.AudioTransportOffer {
+	if h.audio == nil {
+		return nil
+	}
+	o, err := h.audio.Offer(clientID, roomID)
+	if err != nil {
+		log.Printf("[AUDIO] no offer for %s: %v", clientID, err)
+		return nil
+	}
+	return &types.AudioTransportOffer{URLs: o.URLs, CertHash: o.CertHash, Ticket: o.Ticket}
 }

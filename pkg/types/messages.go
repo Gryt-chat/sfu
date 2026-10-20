@@ -120,6 +120,16 @@ type RoomJoinedData struct {
 
 	// MaxIngestKbps is SFU_MAX_INGEST_KBPS. The client keeps its uplink under it; the SFU doesn't enforce it.
 	MaxIngestKbps int `json:"max_ingest_kbps,omitempty"`
+
+	// AudioTransport opens the own voice transport (GRYT-1818); absent when it's off. Older clients ignore it.
+	AudioTransport *AudioTransportOffer `json:"audio_transport,omitempty"`
+}
+
+// AudioTransportOffer is where and how a client opens its voice session: the cert it pins, and a one-time ticket.
+type AudioTransportOffer struct {
+	URLs     []string `json:"urls"`
+	CertHash string   `json:"certHash"`
+	Ticket   string   `json:"ticket"`
 }
 
 // Supported WebSocket message events

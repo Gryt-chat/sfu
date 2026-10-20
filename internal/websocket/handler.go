@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
 
+	"sfu-v2/internal/audiotransport"
 	"sfu-v2/internal/config"
 	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
@@ -80,7 +81,14 @@ type Coordinator interface {
 }
 
 // Handler manages WebSocket connections and integrates with other components
+// AudioTransport hands joined clients a ticket for the own voice transport (GRYT-1818).
+type AudioTransport interface {
+	Offer(peerID, roomID string) (audiotransport.Offer, error)
+	Drop(peerID string)
+}
+
 type Handler struct {
+	audio         AudioTransport
 	config        *config.Config
 	webrtcAPI     *webrtc.API
 	trackManager  *track.Manager
@@ -91,6 +99,9 @@ type Handler struct {
 }
 
 // NewHandler creates a new WebSocket handler
+// SetAudioTransport turns on the own voice transport's offers; unset, room_joined carries none.
+func (h *Handler) SetAudioTransport(a AudioTransport) { h.audio = a }
+
 func NewHandler(cfg *config.Config, webrtcAPI *webrtc.API, trackManager *track.Manager, webrtcManager *peerManager.Manager, roomManager *room.Manager, coordinator Coordinator) *Handler {
 	return &Handler{
 		config:        cfg,
@@ -573,12 +584,13 @@ const stillHereMinInterval = time.Second
 
 // sendRoomJoined tells a client it is in, and what this SFU's call timeout is. Neither side
 // needs the other to move first: an older client reads the JSON as an opaque string.
-func (h *Handler) sendRoomJoined(conn *ThreadSafeWriter, message string) {
+func (h *Handler) sendRoomJoined(conn *ThreadSafeWriter, message string, audio *types.AudioTransportOffer) {
 	recovery.SafeExecute("WEBSOCKET", "SEND_ROOM_JOINED", func() error {
 		payload, err := json.Marshal(types.RoomJoinedData{
 			Message:                 message,
 			CallAloneTimeoutSeconds: int(h.config.CallAloneTimeout / time.Second),
 			MaxIngestKbps:           h.config.MaxIngestKbps,
+			AudioTransport:          audio,
 		})
 		if err != nil {
 			return err

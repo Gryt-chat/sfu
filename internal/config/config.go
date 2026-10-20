@@ -17,6 +17,8 @@ const (
 	// DefaultICEUDPMuxPort is where media goes when nothing says otherwise.
 	// 3478 needs no privileged bind and is already open on hosts that run STUN.
 	DefaultICEUDPMuxPort = 3478
+	// Its own port, so voice's QUIC never shares WebRTC's socket (decided 2026-10-20).
+	DefaultAudioTransportPort = 4433
 	// DefaultMaxPeers is a guardrail, not a property of the transport.
 	DefaultMaxPeers = 200
 
@@ -86,6 +88,9 @@ type Config struct {
 
 	// The most one peer should send, in kbps, told to clients in room_joined. Zero is no cap.
 	MaxIngestKbps int
+
+	// AudioTransportPort is the UDP port of the own voice transport (GRYT-1818). 0 turns it off.
+	AudioTransportPort int
 }
 
 // Load reads configuration from environment variables
@@ -112,6 +117,15 @@ func Load() (*Config, error) {
 
 	// One UDP port for all media, 3478 unset: the IANA STUN port, and the one a locked-down
 	// network most likely already allows. 443 is tempting and blocked on purpose by vendors.
+	audioTransportPort := DefaultAudioTransportPort
+	if raw := strings.TrimSpace(os.Getenv("AUDIO_TRANSPORT_PORT")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 65535 {
+			return nil, fmt.Errorf("AUDIO_TRANSPORT_PORT=%q is not a UDP port (0 turns it off)", raw)
+		}
+		audioTransportPort = parsed
+	}
+
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
 	if iceUDPMuxPort <= 0 || iceUDPMuxPort > 65535 {
 		iceUDPMuxPort = DefaultICEUDPMuxPort
@@ -262,6 +276,7 @@ func Load() (*Config, error) {
 		VerboseLog:         verboseLog,
 		ICEUDPMuxPort:      iceUDPMuxPort,
 		ICEAdvertiseIPs:    iceAdvertiseIPs,
+		AudioTransportPort: audioTransportPort,
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,
