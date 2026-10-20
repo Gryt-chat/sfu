@@ -27,6 +27,8 @@ type hub struct {
 	mu     sync.Mutex
 	rooms  map[string]map[string]*member
 	nextID uint32
+	// changed is told a room's member list moved, outside the lock (GRYT-1830).
+	changed func(roomID string)
 	// Counters, for metrics and tests.
 	dropped struct{ malformed, rate uint64 }
 }
@@ -36,7 +38,6 @@ func newHub() *hub { return &hub{rooms: map[string]map[string]*member{}} }
 // join adds a peer's session to its room. A peer already there (a reconnect) has its old session closed.
 func (h *hub) join(roomID, peerID string, out datagramSender, close func()) *member {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.nextID++
 	m := &member{id: h.nextID, peerID: peerID, roomID: roomID, out: out, close: close}
 	room := h.rooms[roomID]
@@ -48,20 +49,43 @@ func (h *hub) join(roomID, peerID string, out datagramSender, close func()) *mem
 		old.close()
 	}
 	room[peerID] = m
+	h.mu.Unlock()
+	h.notify(roomID)
 	return m
 }
 
 // leave removes m, but not a newer session that has replaced it.
 func (h *hub) leave(m *member) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	room := h.rooms[m.roomID]
-	if room[m.peerID] == m {
+	left := room[m.peerID] == m
+	if left {
 		delete(room, m.peerID)
 	}
 	if len(room) == 0 {
 		delete(h.rooms, m.roomID)
 	}
+	h.mu.Unlock()
+	if left {
+		h.notify(m.roomID)
+	}
+}
+
+func (h *hub) notify(roomID string) {
+	if h.changed != nil {
+		h.changed(roomID)
+	}
+}
+
+// senders is who sends under which id in a room, by peer.
+func (h *hub) senders(roomID string) map[string]uint32 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string]uint32{}
+	for peerID, m := range h.rooms[roomID] {
+		out[peerID] = m.id
+	}
+	return out
 }
 
 // drop closes a peer's session when it leaves voice over the WebSocket.

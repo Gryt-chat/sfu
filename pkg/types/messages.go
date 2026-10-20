@@ -109,6 +109,12 @@ type VideoWantedData struct {
 	Unknown  int    `json:"unknown"`
 }
 
+// AudioSendersData maps each own-transport sender id in a room, as a decimal string, to the user
+// the join token proved it is, so a packet's speaking flag can light the right ring (GRYT-1830).
+type AudioSendersData struct {
+	Senders map[string]string `json:"senders"`
+}
+
 // RoomJoinedData is the payload of the room_joined a client gets on joining. The server
 // connection gets a plain string on the same event: only a client has a countdown to draw.
 type RoomJoinedData struct {
@@ -164,4 +170,5 @@ const (
 	EventStillHere        = "still_here"
 	EventVideoDemand      = "video_demand"
 	EventVideoWanted      = "video_wanted"
+	EventAudioSenders     = "audio_senders"
 )

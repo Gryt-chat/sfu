@@ -85,6 +85,7 @@ type Coordinator interface {
 type AudioTransport interface {
 	Offer(peerID, roomID string) (audiotransport.Offer, error)
 	Drop(peerID string)
+	OnSenders(fn func(roomID string, senders map[string]uint32))
 }
 
 type Handler struct {
@@ -100,7 +101,10 @@ type Handler struct {
 
 // NewHandler creates a new WebSocket handler
 // SetAudioTransport turns on the own voice transport's offers; unset, room_joined carries none.
-func (h *Handler) SetAudioTransport(a AudioTransport) { h.audio = a }
+func (h *Handler) SetAudioTransport(a AudioTransport) {
+	h.audio = a
+	a.OnSenders(h.sendAudioSenders)
+}
 
 func NewHandler(cfg *config.Config, webrtcAPI *webrtc.API, trackManager *track.Manager, webrtcManager *peerManager.Manager, roomManager *room.Manager, coordinator Coordinator) *Handler {
 	return &Handler{

@@ -76,6 +76,12 @@ func New(port int, hosts []string) *Server {
 	return s
 }
 
+// OnSenders calls fn with a room's sender ids, by peer, whenever someone's session joins or leaves
+// it, so clients can tell whose packet is whose (GRYT-1830). Set it before serving.
+func (s *Server) OnSenders(fn func(roomID string, senders map[string]uint32)) {
+	s.hub.changed = func(roomID string) { fn(roomID, s.hub.senders(roomID)) }
+}
+
 // ListenAndServe blocks; run it in a goroutine.
 func (s *Server) ListenAndServe() error { return s.h3.ListenAndServe() }
 
