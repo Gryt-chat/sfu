@@ -178,13 +178,14 @@ func main() {
 	}
 
 	// The own voice transport (GRYT-1818): clients reach it at the addresses WebRTC advertises.
+	var audio *audiotransport.Server
 	switch {
 	case cfg.AudioTransportPort == 0:
 		log.Printf("🎙️ Audio transport off (AUDIO_TRANSPORT_PORT=0)")
 	case len(cfg.ICEAdvertiseIPs) == 0:
 		log.Printf("🎙️ Audio transport off: it needs ICE_ADVERTISE_IP to tell clients where to connect")
 	default:
-		audio := audiotransport.New(cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
+		audio = audiotransport.New(cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
 		recovery.SafeGoroutine("MAIN", "AUDIO_TRANSPORT", func() {
 			if err := audio.ListenAndServe(); err != nil {
 				log.Printf("❌ Audio transport stopped: %v", err)
@@ -322,6 +323,12 @@ func main() {
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprintf(w, "Server registration is not served on this port. Point SFU_WS_HOST at port %d.\n", cfg.ControlPort)
+			return
+		}
+
+		// The own transport's fallback for clients without WebTransport or UDP (GRYT-1831).
+		if r.URL.Path == "/audio-ws" && audio != nil {
+			audio.ServeWebSocket(w, r)
 			return
 		}
 
