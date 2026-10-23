@@ -115,6 +115,12 @@ type AudioSendersData struct {
 	Senders map[string]string `json:"senders"`
 }
 
+// WebRTCAudioData says whether anyone in a room is off the own transport, and so still needs
+// everyone's WebRTC audio (GRYT-1853). False lets a client on the transport stop sending its copy.
+type WebRTCAudioData struct {
+	Wanted bool `json:"wanted"`
+}
+
 // RoomJoinedData is the payload of the room_joined a client gets on joining. The server
 // connection gets a plain string on the same event: only a client has a countdown to draw.
 type RoomJoinedData struct {
@@ -171,4 +177,5 @@ const (
 	EventVideoDemand      = "video_demand"
 	EventVideoWanted      = "video_wanted"
 	EventAudioSenders     = "audio_senders"
+	EventWebRTCAudio      = "webrtc_audio_wanted"
 )
