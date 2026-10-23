@@ -142,6 +142,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 				h.debugLog("🚪 Client %s leaving room '%s'", clientID, joinData.RoomID)
 				h.roomManager.RemovePeerFromRoom(joinData.RoomID, clientID)
 				h.webrtcManager.RemovePeerFromRoom(joinData.RoomID, clientID)
+				h.roomChanged(joinData.RoomID)
 				// Its demand goes too, which can let a sender shrink or pause.
 				for _, lf := range h.trackManager.GetForwardersInRoom(joinData.RoomID) {
 					lf.RemoveReceiver(clientID)
@@ -154,6 +155,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		// Send success message
 		h.debugLog("✅ Client %s successfully joined room '%s'", clientID, joinData.RoomID)
 		h.sendRoomJoined(conn, "Successfully joined room", h.audioOffer(clientID, joinData.RoomID))
+		h.roomChanged(joinData.RoomID)
 		if h.audio != nil {
 			defer h.audio.Drop(clientID)
 		}

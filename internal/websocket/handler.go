@@ -86,6 +86,7 @@ type AudioTransport interface {
 	Offer(peerID, roomID string) (audiotransport.Offer, error)
 	Drop(peerID string)
 	OnSenders(fn func(roomID string, senders map[string]uint32))
+	Senders(roomID string) map[string]uint32
 }
 
 type Handler struct {

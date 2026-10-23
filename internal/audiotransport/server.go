@@ -82,6 +82,9 @@ func (s *Server) OnSenders(fn func(roomID string, senders map[string]uint32)) {
 	s.hub.changed = func(roomID string) { fn(roomID, s.hub.senders(roomID)) }
 }
 
+// Senders is who sends on the transport in a room right now, by peer.
+func (s *Server) Senders(roomID string) map[string]uint32 { return s.hub.senders(roomID) }
+
 // ListenAndServe blocks; run it in a goroutine.
 func (s *Server) ListenAndServe() error { return s.h3.ListenAndServe() }
 
