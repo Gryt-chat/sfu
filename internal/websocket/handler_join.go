@@ -108,6 +108,7 @@ func (h *Handler) handleClientConnection(conn *ThreadSafeWriter, clientID string
 		defer func() {
 			recovery.SafeExecuteWithContext("WEBSOCKET", "CLEANUP_PEER_CONNECTION", clientID, joinData.RoomID, "Cleaning up peer connection", func() error {
 				if peerConnection != nil {
+					forgetScreenSlots(peerConnection)
 					peerConnection.Close()
 				}
 				return nil
@@ -395,9 +396,16 @@ func slotOf(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) (int, webrt
 		return -1, 0
 	}
 	for i, transceiver := range pc.GetTransceivers() {
-		if transceiver.Receiver() == receiver {
-			return i, transceiver.Kind()
+		if transceiver.Receiver() != receiver {
+			continue
 		}
+		if _, extra := extraScreenReceivers.Load(receiver); extra {
+			if transceiver.Kind() == webrtc.RTPCodecTypeAudio {
+				return slotScreenAudio, transceiver.Kind()
+			}
+			return slotScreen, transceiver.Kind()
+		}
+		return i, transceiver.Kind()
 	}
 	return -1, 0
 }
