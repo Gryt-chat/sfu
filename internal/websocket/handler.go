@@ -431,6 +431,13 @@ func (h *Handler) handleClientMessages(conn *ThreadSafeWriter, peerConnection *w
 					go h.coordinator.SignalPeerConnectionsInRoom(roomID)
 					return nil
 				case types.EventRenegotiate:
+					// Data is empty from clients that share one window, and {"screens": n} for several.
+					var req screensRequest
+					if message.Data != "" && recovery.SafeJSONUnmarshal([]byte(message.Data), &req) == nil && req.Screens > 1 {
+						if err := ensureScreenSlots(peerConnection, req.Screens); err != nil {
+							h.debugLog("❌ Adding screen slots for %s failed: %v", clientID, err)
+						}
+					}
 					pendingRenegotiate = h.renegotiateOrDefer(peerConnection, conn, clientID, roomID)
 					return nil
 				case types.EventSetLayer:
