@@ -194,14 +194,14 @@ func TestHubSaysWhoSendsUnderWhichIDOnJoinAndLeave(t *testing.T) {
 func TestHandlerRefusesWithoutWebTransportOrTicket(t *testing.T) {
 	s := New(0, []string{"203.0.113.7"})
 	get := httptest.NewRecorder()
-	s.handle(get, httptest.NewRequest(http.MethodGet, "/audio", nil))
+	s.handle(get, httptest.NewRequest(http.MethodGet, "/audio", nil), s.hub, s.tickets)
 	if get.Code != http.StatusBadRequest {
 		t.Fatalf("a plain GET got %d", get.Code)
 	}
 	req := httptest.NewRequest(http.MethodConnect, "/audio?ticket=made-up", nil)
 	req.Proto = "webtransport-h3"
 	rec := httptest.NewRecorder()
-	s.handle(rec, req)
+	s.handle(rec, req, s.hub, s.tickets)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("a made-up ticket got %d", rec.Code)
 	}

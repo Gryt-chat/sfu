@@ -93,6 +93,8 @@ type Config struct {
 	AudioTransportPort int
 	// AudioUDPPort is the native engine's plain UDP listener (GRYT-1822), next to the transport. 0, the default, is off.
 	AudioUDPPort int
+	// VideoTransport turns on video over the own transport, beside WebRTC's. Off by default.
+	VideoTransport bool
 }
 
 // Load reads configuration from environment variables
@@ -135,6 +137,15 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("AUDIO_UDP_PORT=%q is not a UDP port (0 turns it off)", raw)
 		}
 		audioUDPPort = parsed
+	}
+
+	videoTransport := false
+	if raw := strings.TrimSpace(os.Getenv("VIDEO_TRANSPORT")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("VIDEO_TRANSPORT=%q is not true or false", raw)
+		}
+		videoTransport = parsed
 	}
 
 	iceUDPMuxPort, _ := strconv.Atoi(os.Getenv("ICE_UDP_MUX_PORT"))
@@ -289,6 +300,7 @@ func Load() (*Config, error) {
 		ICEAdvertiseIPs:    iceAdvertiseIPs,
 		AudioTransportPort: audioTransportPort,
 		AudioUDPPort:       audioUDPPort,
+		VideoTransport:     videoTransport,
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
 		MetricsPort:        metricsPort,
