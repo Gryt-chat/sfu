@@ -87,6 +87,7 @@ type AudioTransport interface {
 	Drop(peerID string)
 	OnSenders(fn func(roomID string, senders map[string]uint32))
 	Senders(roomID string) map[string]uint32
+	JoinVirtual(roomID, peerID string, out func([]byte)) *audiotransport.Virtual
 }
 
 type Handler struct {
@@ -202,19 +203,26 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string) error {
 	return recovery.SafeExecuteWithContext("WEBSOCKET", "HANDLE_SERVER", clientID, "", "Server connection handling", func() error {
 		h.debugLog("🖥️  Server connection established: %s", clientID)
+		virtual := &virtualSet{}
+		defer h.leaveAllVirtual(virtual)
 
 		for {
 			var raw []byte
+			var kind int
 			var err error
 
 			err = recovery.SafeExecuteWithContext("WEBSOCKET", "READ_SERVER_MESSAGE", clientID, "", "Reading server message", func() error {
-				_, raw, err = conn.ReadMessage()
+				kind, raw, err = conn.ReadMessage()
 				return err
 			})
 
 			if err != nil {
 				h.debugLog("❌ Error reading server message from %s: %v", clientID, err)
 				return err
+			}
+			if kind == websocket.BinaryMessage {
+				h.handleVirtualFrame(virtual, raw)
+				continue
 			}
 
 			message := &types.WebSocketMessage{}
@@ -239,6 +247,10 @@ func (h *Handler) handleServerConnection(conn *ThreadSafeWriter, clientID string
 					return h.handleUserCapabilities(message.Data)
 				case types.EventSyncRequest:
 					return h.handleSyncRequest(conn, message.Data)
+				case types.EventVirtualJoin:
+					return h.handleVirtualJoin(conn, virtual, message.Data)
+				case types.EventVirtualLeave:
+					return h.handleVirtualLeave(virtual, message.Data)
 				case types.EventKeepAlive:
 					if h.config.Debug {
 						h.debugLog("💓 Keep-alive received from server %s", clientID)
