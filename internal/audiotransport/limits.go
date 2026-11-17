@@ -26,8 +26,8 @@ const (
 	videoVersion     = 2
 	videoHeaderBytes = 16
 	maxPieceBytes    = 1100
-	// A frame of 1024 pieces is about 1.1 MB, past any keyframe a screen share sends.
-	maxPieces = 1024
+	// A frame of 4096 pieces is about 4.5 MB, room for a 4K keyframe.
+	maxPieces = 4096
 )
 
 func validVideoDatagram(b []byte) bool {
@@ -43,8 +43,8 @@ func validVideoDatagram(b []byte) bool {
 const (
 	ratePerSecond = 500
 	rateBurst     = 50
-	// About 35 Mbit/s of video, with room for one whole keyframe at once.
-	videoRatePerSecond = 4000
+	// About 105 Mbit/s of video, enough for 4K at 240 fps, with room for one whole keyframe at once.
+	videoRatePerSecond = 12000
 	videoRateBurst     = maxPieces
 )
 
