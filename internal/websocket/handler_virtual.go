@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/binary"
 	"sync"
 
 	"sfu-v2/internal/audiotransport"
@@ -9,6 +10,7 @@ import (
 )
 
 // A binary frame on the server connection: op, peer id length, peer id, then one own-transport datagram.
+// Op 2, room to server, has the sender's user id (length, then id) in front of the datagram.
 const (
 	frameToRoom   = 1
 	frameFromRoom = 2
@@ -58,9 +60,30 @@ func (h *Handler) handleVirtualJoin(conn *ThreadSafeWriter, set *virtualSet, dat
 				}
 			}
 		}()
+		// By user id rather than the hub's number, so the server can leave out someone switched off for the bridge.
+		users := map[uint32]string{}
+		var usersMu sync.Mutex
 		out = func(b []byte) {
+			if len(b) < 4 {
+				return
+			}
+			id := binary.BigEndian.Uint32(b)
+			usersMu.Lock()
+			user, ok := users[id]
+			if !ok {
+				for peer, n := range h.audio.Senders(req.RoomID) {
+					if u, live := h.live.userOf(peer); live {
+						users[n] = u
+					}
+				}
+				user, ok = users[id]
+			}
+			usersMu.Unlock()
+			if !ok || len(user) > maxVirtualID {
+				return
+			}
 			select {
-			case queue <- frame(frameFromRoom, peerID, b):
+			case queue <- frame(frameFromRoom, peerID, append(append([]byte{byte(len(user))}, user...), b[4:]...)):
 			default:
 			}
 		}

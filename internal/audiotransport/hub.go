@@ -23,6 +23,8 @@ type member struct {
 	video *videoMember
 	// wants is the top temporal layer this viewer takes, by sender id and track. No entry means all of them.
 	wants map[uint32]map[uint8]uint8
+	// virtual is a member the Gryt server speaks for; virtual members don't hear each other, or a bridge would echo.
+	virtual bool
 }
 
 // hub fans audio out to everyone else in a room. The sender id it puts in front comes from the
@@ -145,7 +147,7 @@ func (h *hub) forward(m *member, b []byte, now time.Time) {
 	}
 	others := make([]*member, 0, len(h.rooms[m.roomID]))
 	for _, o := range h.rooms[m.roomID] {
-		if o != m && (!h.kind.controls || o.wantsPiece(m.id, b)) {
+		if o != m && !(o.virtual && m.virtual) && (!h.kind.controls || o.wantsPiece(m.id, b)) {
 			others = append(others, o)
 		}
 	}

@@ -16,12 +16,16 @@ type Virtual struct {
 	m   *member
 }
 
-// JoinVirtual adds peerID to roomID's audio. out gets everyone else's datagrams, sender id in front; nil drops them.
+// JoinVirtual adds peerID to roomID's audio. out gets the clients' datagrams, sender id in front, and never another virtual member's; nil drops them.
 func (s *Server) JoinVirtual(roomID, peerID string, out func([]byte)) *Virtual {
 	if out == nil {
 		out = func([]byte) {}
 	}
-	return &Virtual{hub: s.hub, m: s.hub.join(roomID, peerID, funcSender(out), nil)}
+	m := s.hub.join(roomID, peerID, funcSender(out), nil)
+	s.hub.mu.Lock()
+	m.virtual = true
+	s.hub.mu.Unlock()
+	return &Virtual{hub: s.hub, m: m}
 }
 
 // Send fans one datagram out to the room, under the same checks and rate limit as a client's.
