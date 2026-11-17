@@ -186,6 +186,10 @@ func main() {
 		log.Printf("🎙️ Audio transport off: it needs ICE_ADVERTISE_IP to tell clients where to connect")
 	default:
 		audio = audiotransport.New(cfg.AudioTransportPort, cfg.ICEAdvertiseIPs)
+		if cfg.VideoTransport {
+			audio.EnableVideo()
+			log.Printf("🎥 Video on the own transport (VIDEO_TRANSPORT)")
+		}
 		recovery.SafeGoroutine("MAIN", "AUDIO_TRANSPORT", func() {
 			if err := audio.ListenAndServe(); err != nil {
 				log.Printf("❌ Audio transport stopped: %v", err)

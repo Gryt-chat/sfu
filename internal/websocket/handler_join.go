@@ -461,5 +461,11 @@ func (h *Handler) audioOffer(clientID, roomID string) *types.AudioTransportOffer
 	if o.UDP != nil {
 		offer.UDP = &types.AudioUDPOffer{Addrs: o.UDP.Addrs, Session: o.UDP.Session, Key: o.UDP.Key}
 	}
+	if v := o.Video; v != nil {
+		offer.Video = &types.VideoTransportOffer{URLs: v.URLs, Ticket: v.Ticket}
+		if v.UDP != nil {
+			offer.Video.UDP = &types.AudioUDPOffer{Addrs: v.UDP.Addrs, Session: v.UDP.Session, Key: v.UDP.Key}
+		}
+	}
 	return offer
 }

@@ -1,5 +1,5 @@
 // Package audiotransport is the own voice transport's SFU side (GRYT-1818): WebTransport datagrams
-// over QUIC, fanned out per room. Video and screen share stay on WebRTC.
+// over QUIC, fanned out per room. Video rides the same sessions on a hub of its own once EnableVideo is called.
 package audiotransport
 
 import (
@@ -30,6 +30,15 @@ type Offer struct {
 	Ticket   string   `json:"ticket"`
 	// The native engine's plain UDP, when the listener runs (GRYT-1822).
 	UDP *UDPOffer `json:"udp,omitempty"`
+	// Video's own session, when it's turned on. It shares the cert, not the ticket or the UDP key.
+	Video *VideoOffer `json:"video,omitempty"`
+}
+
+// VideoOffer is a joined peer's way into the video hub: WebTransport at /video, or a UDP session of its own.
+type VideoOffer struct {
+	URLs   []string  `json:"urls"`
+	Ticket string    `json:"ticket"`
+	UDP    *UDPOffer `json:"udp,omitempty"`
 }
 
 type Server struct {
@@ -39,6 +48,9 @@ type Server struct {
 	tickets *tickets
 	hub     *hub
 	h3      *http3.Server
+	// video and its tickets stay nil until EnableVideo.
+	video        *hub
+	videoTickets *tickets
 
 	mu  sync.Mutex
 	udp *udpListener
@@ -54,7 +66,14 @@ func New(port int, hosts []string) *Server {
 	}
 	s := &Server{port: port, hosts: hosts, certs: newCertStore(ips), tickets: newTickets(), hub: newHub()}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/audio", s.handle)
+	mux.HandleFunc("/audio", func(w http.ResponseWriter, r *http.Request) { s.handle(w, r, s.hub, s.tickets) })
+	mux.HandleFunc("/video", func(w http.ResponseWriter, r *http.Request) {
+		if s.video == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.handle(w, r, s.video, s.videoTickets)
+	})
 	s.h3 = &http3.Server{
 		Addr:    ":" + strconv.Itoa(port),
 		Handler: mux,
@@ -85,6 +104,19 @@ func (s *Server) OnSenders(fn func(roomID string, senders map[string]uint32)) {
 // Senders is who sends on the transport in a room right now, by peer.
 func (s *Server) Senders(roomID string) map[string]uint32 { return s.hub.senders(roomID) }
 
+// EnableVideo opens the video hub. Call it before serving, and before ListenUDP.
+func (s *Server) EnableVideo() {
+	s.video = newVideoHub()
+	s.videoTickets = newTickets()
+}
+
+// OnVideoSenders is OnSenders for the video hub, whose ids are its own. Does nothing while video is off.
+func (s *Server) OnVideoSenders(fn func(roomID string, senders map[string]uint32)) {
+	if s.video != nil {
+		s.video.changed = func(roomID string) { fn(roomID, s.video.senders(roomID)) }
+	}
+}
+
 // ListenAndServe blocks; run it in a goroutine.
 func (s *Server) ListenAndServe() error { return s.h3.ListenAndServe() }
 
@@ -111,12 +143,37 @@ func (s *Server) Offer(peerID, roomID string) (Offer, error) {
 			return Offer{}, err
 		}
 	}
+	if s.video != nil {
+		if offer.Video, err = s.videoOffer(u, peerID, roomID); err != nil {
+			return Offer{}, err
+		}
+	}
 	return offer, nil
 }
 
-// Drop ends a peer's audio session; called when it leaves voice.
+func (s *Server) videoOffer(u *udpListener, peerID, roomID string) (*VideoOffer, error) {
+	ticket, err := s.videoTickets.issue(peerID, roomID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	o := &VideoOffer{Ticket: ticket}
+	for _, h := range s.hosts {
+		o.URLs = append(o.URLs, fmt.Sprintf("https://%s/video", net.JoinHostPort(h, strconv.Itoa(s.port))))
+	}
+	if u != nil {
+		if o.UDP, err = u.offerVideo(peerID, roomID, time.Now()); err != nil {
+			return nil, err
+		}
+	}
+	return o, nil
+}
+
+// Drop ends a peer's audio and video sessions; called when it leaves voice.
 func (s *Server) Drop(peerID string) {
 	s.hub.drop(peerID)
+	if s.video != nil {
+		s.video.drop(peerID)
+	}
 	s.mu.Lock()
 	u := s.udp
 	s.mu.Unlock()
@@ -129,12 +186,12 @@ func isWebTransport(r *http.Request) bool {
 	return r.Method == http.MethodConnect && (r.Proto == "webtransport-h3" || r.Proto == "webtransport")
 }
 
-func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handle(w http.ResponseWriter, r *http.Request, h *hub, tk *tickets) {
 	if !isWebTransport(r) {
 		http.Error(w, "webtransport only", http.StatusBadRequest)
 		return
 	}
-	t, ok := s.tickets.redeem(r.URL.Query().Get("ticket"), time.Now())
+	t, ok := tk.redeem(r.URL.Query().Get("ticket"), time.Now())
 	if !ok {
 		http.Error(w, "no such ticket", http.StatusUnauthorized)
 		return
@@ -160,12 +217,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	str := w.(http3.HTTPStreamer).HTTPStream()
 	ctx, cancel := context.WithCancel(r.Context())
-	m := s.hub.join(t.roomID, t.peerID, str, func() {
+	m := h.join(t.roomID, t.peerID, str, func() {
 		cancel()
 		str.CancelRead(0)
 		_ = str.Close()
 	})
-	defer s.hub.leave(m)
+	defer h.leave(m)
 	defer cancel()
 	for {
 		b, err := str.ReceiveDatagram(ctx)
@@ -175,6 +232,6 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		s.hub.forward(m, b, time.Now())
+		h.forward(m, b, time.Now())
 	}
 }

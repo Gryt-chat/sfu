@@ -24,6 +24,7 @@ type member struct {
 // hub fans audio out to everyone else in a room. The sender id it puts in front comes from the
 // member, which came from a redeemed ticket: never from the packet.
 type hub struct {
+	kind   kind
 	mu     sync.Mutex
 	rooms  map[string]map[string]*member
 	nextID uint32
@@ -33,7 +34,10 @@ type hub struct {
 	dropped struct{ malformed, rate uint64 }
 }
 
-func newHub() *hub { return &hub{rooms: map[string]map[string]*member{}} }
+func newHub() *hub { return &hub{kind: audioKind, rooms: map[string]map[string]*member{}} }
+
+// newVideoHub is the same fan-out for video pieces, with its own sender ids, kept apart from audio's.
+func newVideoHub() *hub { return &hub{kind: videoKind, rooms: map[string]map[string]*member{}} }
 
 // join adds a peer's session to its room. A peer already there (a reconnect) has its old session closed.
 func (h *hub) join(roomID, peerID string, out datagramSender, close func()) *member {
@@ -109,12 +113,12 @@ func (h *hub) drop(peerID string) {
 // forward sends one datagram from m to everyone else in its room, or drops it.
 func (h *hub) forward(m *member, b []byte, now time.Time) {
 	h.mu.Lock()
-	if !validDatagram(b) {
+	if !h.kind.valid(b) {
 		h.dropped.malformed++
 		h.mu.Unlock()
 		return
 	}
-	if !m.rate.allow(now) {
+	if !m.rate.allowAt(now, h.kind.rate, h.kind.burst) {
 		h.dropped.rate++
 		h.mu.Unlock()
 		return
@@ -133,7 +137,7 @@ func (h *hub) forward(m *member, b []byte, now time.Time) {
 	binary.BigEndian.PutUint32(out, m.id)
 	copy(out[senderBytes:], b)
 	for _, o := range others {
-		// A full or closed session loses this packet; audio doesn't wait.
+		// A full or closed session loses this packet; neither audio nor video waits.
 		_ = o.out.SendDatagram(out)
 	}
 }

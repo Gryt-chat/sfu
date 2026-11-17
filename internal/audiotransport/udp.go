@@ -32,6 +32,8 @@ type udpSession struct {
 	created        time.Time
 	in             replay
 	conn           *net.UDPConn
+	hub            *hub
+	header         int
 
 	mu     sync.Mutex
 	addr   *net.UDPAddr
@@ -47,10 +49,11 @@ func (s *udpSession) SendDatagram(b []byte) error {
 	s.out++
 	counter := s.out
 	s.mu.Unlock()
-	if addr == nil || len(b) < senderBytes+headerBytes {
+	clear := senderBytes + s.header
+	if addr == nil || len(b) < clear {
 		return errors.New("no address yet")
 	}
-	_, err := s.conn.WriteToUDP(seal(s.aead, dirFromSFU, s.id, counter, b[:senderBytes+headerBytes], b[senderBytes+headerBytes:]), addr)
+	_, err := s.conn.WriteToUDP(seal(s.aead, dirFromSFU, s.id, counter, b[:clear], b[clear:]), addr)
 	return err
 }
 
@@ -65,6 +68,8 @@ type udpListener struct {
 	hosts []string
 	port  int
 	hub   *hub
+	// video is nil unless the server turned video on.
+	video *hub
 
 	mu       sync.Mutex
 	sessions map[uint32]*udpSession
@@ -78,7 +83,7 @@ func (s *Server) ListenUDP(port int) error {
 	if err != nil {
 		return err
 	}
-	u := &udpListener{conn: conn, hosts: s.hosts, port: port, hub: s.hub, sessions: map[uint32]*udpSession{}}
+	u := &udpListener{conn: conn, hosts: s.hosts, port: port, hub: s.hub, video: s.video, sessions: map[uint32]*udpSession{}}
 	s.mu.Lock()
 	s.udp = u
 	s.mu.Unlock()
@@ -86,6 +91,18 @@ func (s *Server) ListenUDP(port int) error {
 }
 
 func (u *udpListener) offer(peerID, roomID string, now time.Time) (*UDPOffer, error) {
+	return u.offerOn(u.hub, peerID, roomID, now)
+}
+
+// offerVideo is a second session for the same peer, on the video hub. Nil when video is off.
+func (u *udpListener) offerVideo(peerID, roomID string, now time.Time) (*UDPOffer, error) {
+	if u.video == nil {
+		return nil, nil
+	}
+	return u.offerOn(u.video, peerID, roomID, now)
+}
+
+func (u *udpListener) offerOn(h *hub, peerID, roomID string, now time.Time) (*UDPOffer, error) {
 	key := make([]byte, chacha20poly1305.KeySize)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
@@ -109,7 +126,7 @@ func (u *udpListener) offer(peerID, roomID string, now time.Time) (*UDPOffer, er
 		}
 		id = binary.BigEndian.Uint32(b[:])
 	}
-	u.sessions[id] = &udpSession{id: id, aead: aead, peerID: peerID, roomID: roomID, created: now, conn: u.conn}
+	u.sessions[id] = &udpSession{id: id, aead: aead, peerID: peerID, roomID: roomID, created: now, conn: u.conn, hub: h, header: h.kind.header}
 	addrs := make([]string, 0, len(u.hosts))
 	for _, h := range u.hosts {
 		addrs = append(addrs, net.JoinHostPort(h, strconv.Itoa(u.port)))
@@ -141,7 +158,7 @@ func (u *udpListener) serve() error {
 
 // receive opens one datagram and forwards it. Nothing is read before the tag holds except the session id.
 func (u *udpListener) receive(b []byte, addr *net.UDPAddr, now time.Time) {
-	if len(b) < sealPrefix+headerBytes+tagBytes {
+	if len(b) < sealPrefix+tagBytes {
 		return
 	}
 	u.mu.Lock()
@@ -154,7 +171,7 @@ func (u *udpListener) receive(b []byte, addr *net.UDPAddr, now time.Time) {
 		return
 	}
 	s.mu.Lock()
-	clear, secret, ok := open(s.aead, dirToSFU, b, headerBytes, &s.in)
+	clear, secret, ok := open(s.aead, dirToSFU, b, s.header, &s.in)
 	if !ok {
 		s.mu.Unlock()
 		u.mu.Lock()
@@ -166,7 +183,7 @@ func (u *udpListener) receive(b []byte, addr *net.UDPAddr, now time.Time) {
 	m := s.member
 	s.mu.Unlock()
 	if m == nil {
-		m = u.hub.join(s.roomID, s.peerID, s, func() {
+		m = s.hub.join(s.roomID, s.peerID, s, func() {
 			u.mu.Lock()
 			delete(u.sessions, s.id)
 			u.mu.Unlock()
@@ -175,5 +192,5 @@ func (u *udpListener) receive(b []byte, addr *net.UDPAddr, now time.Time) {
 		s.member = m
 		s.mu.Unlock()
 	}
-	u.hub.forward(m, append(append([]byte{}, clear...), secret...), now)
+	s.hub.forward(m, append(append([]byte{}, clear...), secret...), now)
 }

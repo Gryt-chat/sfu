@@ -144,6 +144,15 @@ type AudioTransportOffer struct {
 	Ticket   string   `json:"ticket"`
 	// The native engine's plain UDP, when AUDIO_UDP_PORT is set (GRYT-1822).
 	UDP *AudioUDPOffer `json:"udp,omitempty"`
+	// Video's own sessions, when VIDEO_TRANSPORT is on.
+	Video *VideoTransportOffer `json:"video,omitempty"`
+}
+
+// VideoTransportOffer is the video hub's WebTransport ticket and its own UDP session.
+type VideoTransportOffer struct {
+	URLs   []string       `json:"urls"`
+	Ticket string         `json:"ticket"`
+	UDP    *AudioUDPOffer `json:"udp,omitempty"`
 }
 
 // AudioUDPOffer is a session id and its key; a packet that opens with the key is the only proof needed.
@@ -177,5 +186,6 @@ const (
 	EventVideoDemand      = "video_demand"
 	EventVideoWanted      = "video_wanted"
 	EventAudioSenders     = "audio_senders"
+	EventVideoSenders     = "video_senders"
 	EventWebRTCAudio      = "webrtc_audio_wanted"
 )

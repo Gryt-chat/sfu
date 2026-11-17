@@ -10,6 +10,15 @@ import (
 // sendAudioSenders tells everyone in a room which own-transport sender id is which user, each time
 // a session joins or leaves it (GRYT-1830). A peer that has already left is skipped.
 func (h *Handler) sendAudioSenders(roomID string, senders map[string]uint32) {
+	h.sendSenders(types.EventAudioSenders, roomID, senders)
+}
+
+// sendVideoSenders is the same map for the video hub, whose ids are its own.
+func (h *Handler) sendVideoSenders(roomID string, senders map[string]uint32) {
+	h.sendSenders(types.EventVideoSenders, roomID, senders)
+}
+
+func (h *Handler) sendSenders(event, roomID string, senders map[string]uint32) {
 	users := make(map[string]string, len(senders))
 	for peerID, id := range senders {
 		if userID, ok := h.live.userOf(peerID); ok {
@@ -24,10 +33,10 @@ func (h *Handler) sendAudioSenders(roomID string, senders map[string]uint32) {
 	if err != nil {
 		return
 	}
-	msg := &types.WebSocketMessage{Event: types.EventAudioSenders, Data: string(payload)}
+	msg := &types.WebSocketMessage{Event: event, Data: string(payload)}
 	for clientID, conn := range conns {
 		if err := conn.WriteJSON(msg); err != nil {
-			h.debugLog("⚠️ audio_senders to %s failed: %v", clientID, err)
+			h.debugLog("⚠️ %s to %s failed: %v", event, clientID, err)
 		}
 	}
 	h.sendWebRTCAudioWanted(roomID, senders)

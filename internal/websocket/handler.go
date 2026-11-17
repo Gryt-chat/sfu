@@ -105,6 +105,11 @@ type Handler struct {
 func (h *Handler) SetAudioTransport(a AudioTransport) {
 	h.audio = a
 	a.OnSenders(h.sendAudioSenders)
+	if v, ok := a.(interface {
+		OnVideoSenders(fn func(roomID string, senders map[string]uint32))
+	}); ok {
+		v.OnVideoSenders(h.sendVideoSenders)
+	}
 }
 
 func NewHandler(cfg *config.Config, webrtcAPI *webrtc.API, trackManager *track.Manager, webrtcManager *peerManager.Manager, roomManager *room.Manager, coordinator Coordinator) *Handler {
