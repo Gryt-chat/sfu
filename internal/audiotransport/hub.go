@@ -21,6 +21,8 @@ type member struct {
 	rate   bucket
 	// video is a video sender's kept pieces, made on its first piece or first request about it.
 	video *videoMember
+	// wants is the top temporal layer this viewer takes, by sender id and track. No entry means all of them.
+	wants map[uint32]map[uint8]uint8
 }
 
 // hub fans audio out to everyone else in a room. The sender id it puts in front comes from the
@@ -67,6 +69,9 @@ func (h *hub) leave(m *member) {
 	left := room[m.peerID] == m
 	if left {
 		delete(room, m.peerID)
+		for _, o := range room {
+			delete(o.wants, m.id)
+		}
 	}
 	if len(room) == 0 {
 		delete(h.rooms, m.roomID)
@@ -140,7 +145,7 @@ func (h *hub) forward(m *member, b []byte, now time.Time) {
 	}
 	others := make([]*member, 0, len(h.rooms[m.roomID]))
 	for _, o := range h.rooms[m.roomID] {
-		if o != m {
+		if o != m && (!h.kind.controls || o.wantsPiece(m.id, b)) {
 			others = append(others, o)
 		}
 	}
