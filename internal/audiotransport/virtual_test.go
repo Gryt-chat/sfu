@@ -44,3 +44,21 @@ func TestAVirtualMemberWithoutAListenerHearsNothing(t *testing.T) {
 	s.JoinVirtual("room-1", "virtual:discord:2", nil)
 	s.hub.forward(real, packet(10), time.Now())
 }
+
+func TestVirtualMembersDoNotHearEachOther(t *testing.T) {
+	s := &Server{hub: newHub()}
+	client := &fakeSession{}
+	s.hub.join("room-1", "client-a", client, nil)
+	var bridgeHeard [][]byte
+	bridge := s.JoinVirtual("room-1", "virtual:discord-bridge", func(b []byte) { bridgeHeard = append(bridgeHeard, b) })
+	person := s.JoinVirtual("room-1", "virtual:discord:1", nil)
+
+	person.Send(packet(20))
+	if len(bridgeHeard) != 0 {
+		t.Fatal("a listening virtual member heard another virtual member, which would echo into Discord")
+	}
+	if len(client.got) != 1 {
+		t.Fatal("a client didn't hear the virtual member")
+	}
+	_ = bridge
+}
