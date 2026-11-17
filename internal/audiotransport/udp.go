@@ -25,6 +25,9 @@ type UDPOffer struct {
 // An offered session that never sends a valid packet is forgotten after this, like a ticket.
 const udpSessionTTL = 30 * time.Second
 
+// The UDP socket's receive and send buffers: several keyframes' worth of pieces.
+const socketBuffer = 8 << 20
+
 type udpSession struct {
 	id             uint32
 	aead           cipher.AEAD
@@ -83,6 +86,10 @@ func (s *Server) ListenUDP(port int) error {
 	if err != nil {
 		return err
 	}
+	// A keyframe lands as a few hundred pieces at once while this loop is still writing the last one out.
+	// The OS default buffer holds far fewer, and a piece lost here is one no resend can bring back.
+	_ = conn.SetReadBuffer(socketBuffer)
+	_ = conn.SetWriteBuffer(socketBuffer)
 	u := &udpListener{conn: conn, hosts: s.hosts, port: port, hub: s.hub, video: s.video, sessions: map[uint32]*udpSession{}}
 	s.mu.Lock()
 	s.udp = u
