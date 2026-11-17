@@ -20,9 +20,8 @@ func validDatagram(b []byte) bool {
 	return len(b) > headerBytes && len(b) <= headerBytes+maxOpusBytes && b[0] == packetVersion
 }
 
-// A video datagram is one piece of one encoded frame: version 2, flags (1 keyframe), track, codec, frame u16,
-// piece u16, pieces u16, temporal layer, a zero byte, a 90 kHz timestamp u32, then the piece. Only the version and
-// the piece numbers are checked; the frame is not read.
+// One piece of one encoded frame: version 2, flags (1 keyframe), track, codec, frame u16, piece u16, pieces u16,
+// temporal layer, a zero byte, a 90 kHz timestamp u32, then the piece. Only the version and piece numbers are read.
 const (
 	videoVersion     = 2
 	videoHeaderBytes = 16
