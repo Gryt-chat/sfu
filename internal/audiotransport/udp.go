@@ -90,7 +90,7 @@ func (s *Server) ListenUDP(port int) error {
 	// The OS default buffer holds far fewer, and a piece lost here is one no resend can bring back.
 	_ = conn.SetReadBuffer(socketBuffer)
 	_ = conn.SetWriteBuffer(socketBuffer)
-	u :=&udpListener{conn: conn, hosts: s.hosts, port: port, hub: s.hub, video: s.video, sessions: map[uint32]*udpSession{}}
+	u := &udpListener{conn: conn, hosts: s.hosts, port: port, hub: s.hub, video: s.video, sessions: map[uint32]*udpSession{}}
 	s.mu.Lock()
 	s.udp = u
 	s.mu.Unlock()
