@@ -83,6 +83,16 @@ type UserCapabilitiesData struct {
 	Capabilities   []string `json:"capabilities"`
 }
 
+// VirtualVoiceData adds or removes a voice member the Gryt server speaks for, such as someone on Discord.
+// Listen asks for the room's audio back over the same connection.
+type VirtualVoiceData struct {
+	RoomID         string `json:"room_id"`
+	UserID         string `json:"user_id"`
+	ServerID       string `json:"server_id"`
+	ServerPassword string `json:"server_password"`
+	Listen         bool   `json:"listen"`
+}
+
 // SetLayerData lets a client manually set the max temporal layer for a track.
 type SetLayerData struct {
 	TrackID          string `json:"track_id"`
@@ -188,4 +198,6 @@ const (
 	EventAudioSenders     = "audio_senders"
 	EventVideoSenders     = "video_senders"
 	EventWebRTCAudio      = "webrtc_audio_wanted"
+	EventVirtualJoin      = "virtual_voice_join"
+	EventVirtualLeave     = "virtual_voice_leave"
 )

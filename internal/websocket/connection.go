@@ -57,6 +57,13 @@ func (t *ThreadSafeWriter) WriteJSON(v interface{}) error {
 	return t.Conn.WriteJSON(v)
 }
 
+// WriteBinary writes one binary message in a thread-safe manner.
+func (t *ThreadSafeWriter) WriteBinary(b []byte) error {
+	t.Lock()
+	defer t.Unlock()
+	return t.Conn.WriteMessage(websocket.BinaryMessage, b)
+}
+
 // CloseWithReason says why before hanging up: a bare Close gives every peer 1006, which is
 // also what a snapped cable looks like. Best-effort — a gone peer still gets closed.
 func (t *ThreadSafeWriter) CloseWithReason(code int, reason string) error {

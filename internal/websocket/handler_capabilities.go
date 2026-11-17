@@ -48,7 +48,7 @@ func (p *livePeers) set(roomID, userID string, claims auth.Claims) int {
 	p.mu.Lock()
 	var found []*auth.Live
 	for _, peer := range p.peers {
-		if peer.roomID == roomID && peer.userID == userID {
+		if peer.roomID == roomID && peer.userID == userID && peer.claims != nil {
 			found = append(found, peer.claims)
 		}
 	}
