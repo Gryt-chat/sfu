@@ -46,6 +46,8 @@ func TestControlDatagramsAreChecked(t *testing.T) {
 		{"resend too many", resendRequest(1, 0, make([][2]uint16, maxResend+1)...), false},
 		{"resend none", resendRequest(1, 0), false},
 		{"keyframe with pieces", append(keyframeRequest(1, 0), 0, 0, 0, 0), false},
+		{"layers", layersRequest(1, 0, 1), true},
+		{"layers with pieces", append(layersRequest(1, 0, 1), 0, 0, 0, 0), false},
 		{"short", keyframeRequest(1, 0)[:controlBytes-1], false},
 		{"a piece", videoPacket(0, 1, 10), false},
 	} {
@@ -145,5 +147,56 @@ func TestARequestWithNoPayloadSealsAndOpens(t *testing.T) {
 	got, secret, ok := open(aead, dirFromSFU, seal(aead, dirFromSFU, 1, 1, clear, nil), senderBytes+videoHeaderBytes, &r)
 	if !ok || len(secret) != 0 || !bytes.Equal(got, clear) {
 		t.Fatalf("ok %v, secret %x, clear %x", ok, secret, got)
+	}
+}
+
+func layersRequest(sender uint32, track, top byte) []byte {
+	b := keyframeRequest(sender, track)
+	b[1], b[8] = controlLayers, top
+	return b
+}
+
+func pieceOnLayer(track, layer byte, frame uint16) []byte {
+	b := pieceOfFrame(track, frame, 0, 1)
+	b[10] = layer
+	return b
+}
+
+// A viewer capped at layer 0 gets only layer 0 of that track, one that hid it gets none, and the rest stay whole.
+func TestViewersGetOnlyTheLayersTheyAskFor(t *testing.T) {
+	h := newVideoHub()
+	a, b, c := &fakeSession{}, &fakeSession{}, &fakeSession{}
+	ma := h.join("room", "a", a, nil)
+	mb := h.join("room", "b", b, nil)
+	mc := h.join("room", "c", c, nil)
+	now := time.Now()
+	h.forward(mb, layersRequest(ma.id, 1, 0), now)
+	h.forward(mc, layersRequest(ma.id, 1, layersNone), now)
+	for frame, layer := range []byte{0, 2, 1, 2, 0} {
+		h.forward(ma, pieceOnLayer(1, layer, uint16(frame)), now)
+	}
+	h.forward(ma, pieceOnLayer(2, 2, 9), now)
+	if len(b.got) != 3 {
+		t.Fatalf("B capped at layer 0 got %d pieces, want the 2 on layer 0 and track 2's", len(b.got))
+	}
+	if len(c.got) != 1 {
+		t.Fatalf("C hid track 1 and got %d pieces, want only track 2's", len(c.got))
+	}
+	h.forward(mc, layersRequest(ma.id, 1, layersAll), now)
+	h.forward(ma, pieceOnLayer(1, 2, 10), now)
+	if len(c.got) != 2 {
+		t.Fatal("asking for every layer again didn't bring them back")
+	}
+	if len(a.got) != 0 {
+		t.Fatal("a layers request went to the sender")
+	}
+	h.forward(mb, layersRequest(mb.id, 1, 0), now)
+	h.forward(mb, layersRequest(9999, 1, 0), now)
+	if len(mb.wants) != 1 {
+		t.Fatalf("B holds wants for %d senders, want only A", len(mb.wants))
+	}
+	h.leave(ma)
+	if len(mb.wants) != 0 {
+		t.Fatal("B's wants outlived the sender")
 	}
 }

@@ -5,14 +5,17 @@ import (
 	"time"
 )
 
-// A viewer's control datagram on the video hub: version 3, type, track, count, the sender's video id u32, eight zero
-// bytes, then count pairs of frame u16 and piece u16 for a resend. A keyframe request has none.
+// A viewer's control datagram on the video hub: version 3, type, track, count, the sender's video id u32, eight more
+// bytes, then count pairs of frame u16 and piece u16 for a resend. Only a layers request reads byte 8: the top layer.
 const (
 	controlVersion  = 3
 	controlBytes    = videoHeaderBytes
 	controlKeyframe = 1
 	controlResend   = 2
+	controlLayers   = 3
 	maxResend       = 32
+	layersAll       = 0xff
+	layersNone      = 0xfe
 	// One keyframe request per sender and track gets through in this long, however many viewers ask.
 	keyframeGap = 300 * time.Millisecond
 	// Pieces kept per sender for resends, about a second of a busy screen share.
@@ -68,7 +71,7 @@ func validControl(b []byte) bool {
 	}
 	count := int(b[3])
 	switch b[1] {
-	case controlKeyframe:
+	case controlKeyframe, controlLayers:
 		return count == 0 && len(b) == controlBytes
 	case controlResend:
 		return count > 0 && count <= maxResend && len(b) == controlBytes+4*count
@@ -92,10 +95,14 @@ func (h *hub) control(m *member, b []byte, now time.Time) []func() {
 	if sender == nil {
 		return nil
 	}
+	track := b[2]
+	if b[1] == controlLayers {
+		m.setLayers(senderID, track, b[8])
+		return nil
+	}
 	if sender.video == nil {
 		sender.video = newVideoMember()
 	}
-	track := b[2]
 	if b[1] == controlKeyframe {
 		if last, ok := sender.video.asked[track]; ok && now.Sub(last) < keyframeGap {
 			return nil
@@ -117,4 +124,25 @@ func (h *hub) control(m *member, b []byte, now time.Time) []func() {
 		}
 	}
 	return sends
+}
+
+// setLayers records the highest temporal layer m wants of one sender's track. layersAll forgets it.
+func (m *member) setLayers(sender uint32, track, top uint8) {
+	if top == layersAll {
+		delete(m.wants[sender], track)
+		return
+	}
+	if m.wants == nil {
+		m.wants = map[uint32]map[uint8]uint8{}
+	}
+	if m.wants[sender] == nil {
+		m.wants[sender] = map[uint8]uint8{}
+	}
+	m.wants[sender][track] = top
+}
+
+// wantsPiece is whether m takes a piece from sender, by the piece's temporal layer. layersNone is above any layer.
+func (m *member) wantsPiece(sender uint32, b []byte) bool {
+	top, ok := m.wants[sender][b[2]]
+	return !ok || (top != layersNone && b[10] <= top)
 }
