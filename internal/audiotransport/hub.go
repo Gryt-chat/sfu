@@ -19,6 +19,8 @@ type member struct {
 	out    datagramSender
 	close  func()
 	rate   bucket
+	// video is a video sender's kept pieces, made on its first piece or first request about it.
+	video *videoMember
 }
 
 // hub fans audio out to everyone else in a room. The sender id it puts in front comes from the
@@ -113,6 +115,19 @@ func (h *hub) drop(peerID string) {
 // forward sends one datagram from m to everyone else in its room, or drops it.
 func (h *hub) forward(m *member, b []byte, now time.Time) {
 	h.mu.Lock()
+	if h.kind.controls && len(b) > 0 && b[0] == controlVersion {
+		if !m.rate.allowAt(now, h.kind.rate, h.kind.burst) {
+			h.dropped.rate++
+			h.mu.Unlock()
+			return
+		}
+		sends := h.control(m, b, now)
+		h.mu.Unlock()
+		for _, send := range sends {
+			send()
+		}
+		return
+	}
 	if !h.kind.valid(b) {
 		h.dropped.malformed++
 		h.mu.Unlock()
@@ -129,13 +144,16 @@ func (h *hub) forward(m *member, b []byte, now time.Time) {
 			others = append(others, o)
 		}
 	}
-	h.mu.Unlock()
-	if len(others) == 0 {
-		return
-	}
 	out := make([]byte, senderBytes+len(b))
 	binary.BigEndian.PutUint32(out, m.id)
 	copy(out[senderBytes:], b)
+	if h.kind.controls {
+		if m.video == nil {
+			m.video = newVideoMember()
+		}
+		m.video.keep(pieceOf(b), out)
+	}
+	h.mu.Unlock()
 	for _, o := range others {
 		// A full or closed session loses this packet; neither audio nor video waits.
 		_ = o.out.SendDatagram(out)

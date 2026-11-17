@@ -53,11 +53,13 @@ type kind struct {
 	header      int
 	valid       func([]byte) bool
 	rate, burst float64
+	// controls is video's: version 3 datagrams are requests to the SFU, not pieces to fan out.
+	controls bool
 }
 
 var (
 	audioKind = kind{header: headerBytes, valid: validDatagram, rate: ratePerSecond, burst: rateBurst}
-	videoKind = kind{header: videoHeaderBytes, valid: validVideoDatagram, rate: videoRatePerSecond, burst: videoRateBurst}
+	videoKind = kind{header: videoHeaderBytes, valid: validVideoDatagram, rate: videoRatePerSecond, burst: videoRateBurst, controls: true}
 )
 
 type bucket struct {
