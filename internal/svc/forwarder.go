@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"log"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -66,6 +68,11 @@ type LayerForwarder struct {
 	debug   bool
 	// bytes counts this track's media under its room's server.
 	bytes *metrics.RoomBytes
+	// maxBps is the server's video ceiling from the sender's token, 0 for none.
+	maxBps atomic.Int64
+	// Only run() touches these two.
+	meter          capMeter
+	resumeKeyframe bool
 }
 
 // NewLayerForwarder creates a forwarder for the given remote track and starts its goroutine,
@@ -181,6 +188,9 @@ func (lf *LayerForwarder) OnWantedChange(f func()) {
 	lf.onWanted = f
 	lf.mu.Unlock()
 }
+
+// SetMaxBitrate holds this track to a server's video ceiling, in bits per second; 0 lifts it.
+func (lf *LayerForwarder) SetMaxBitrate(bps int64) { lf.maxBps.Store(bps) }
 
 // RequestKeyframe asks the sender for a keyframe, for a viewer that has nothing to decode from.
 func (lf *LayerForwarder) RequestKeyframe() {
@@ -302,6 +312,19 @@ func (lf *LayerForwarder) run() {
 
 		raw := buf[:n]
 		lf.bytes.In.Add(float64(n))
+		paused, started := lf.meter.add(time.Now(), n, lf.maxBps.Load())
+		if started {
+			log.Printf("⏸️  Pausing video track %s for %v: over 1.5x its server's ceiling of %d kbps for %v", lf.trackID, capPauseFor, lf.maxBps.Load()/1000, capOverFor)
+			metrics.TracksRefused.Inc()
+			lf.resumeKeyframe = true
+		}
+		if paused {
+			continue
+		}
+		if lf.resumeKeyframe {
+			lf.resumeKeyframe = false
+			lf.RequestKeyframe()
+		}
 
 		// Parse the RTP header to extract DD extension.
 		headerLen, unmarshalErr := header.Unmarshal(raw)
