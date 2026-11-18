@@ -13,6 +13,7 @@ import (
 	"sfu-v2/internal/iceguard"
 	"sfu-v2/internal/metrics"
 	"sfu-v2/internal/recovery"
+	"sfu-v2/internal/svc"
 	peerManager "sfu-v2/internal/webrtc"
 	"sfu-v2/pkg/types"
 )
@@ -340,9 +341,11 @@ func (h *Handler) forwardWhileAllowed(t *webrtc.TrackRemote, pc *webrtc.PeerConn
 		})
 	}()
 
+	var video *svc.LayerForwarder
 	if t.Kind() == webrtc.RTPCodecTypeVideo {
 		if lf, ok := h.trackManager.GetForwarder(roomID, t.ID()); ok {
 			h.watchVideoDemand(lf, conn, midOf(pc, receiver))
+			video = lf
 		}
 	}
 
@@ -354,6 +357,9 @@ func (h *Handler) forwardWhileAllowed(t *webrtc.TrackRemote, pc *webrtc.PeerConn
 	// server takes the capability away.
 	for {
 		claims, changed := live.Snapshot()
+		if video != nil {
+			video.SetMaxBitrate(int64(claims.VideoMaxKbps()) * 1000)
+		}
 		if denied := refusedBy(claims, pc, receiver, t.Kind()); denied != "" {
 			h.debugLog("🔇 Cutting %s track from %s in room '%s': %q taken away", t.Kind().String(), clientID, roomID, denied)
 			return true
