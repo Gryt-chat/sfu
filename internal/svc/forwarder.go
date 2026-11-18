@@ -8,6 +8,8 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+
+	"sfu-v2/internal/metrics"
 )
 
 // ReceiverState tracks a single downstream receiver's track and layer subscription.
@@ -62,12 +64,15 @@ type LayerForwarder struct {
 
 	stopped chan struct{}
 	debug   bool
+	// bytes counts this track's media under its room's server.
+	bytes *metrics.RoomBytes
 }
 
 // NewLayerForwarder creates a forwarder for the given remote track and starts its goroutine,
 // which runs until the remote track ends or Stop is called.
-func NewLayerForwarder(remote *webrtc.TrackRemote, senderPC *webrtc.PeerConnection, debug bool) *LayerForwarder {
+func NewLayerForwarder(roomID string, remote *webrtc.TrackRemote, senderPC *webrtc.PeerConnection, debug bool) *LayerForwarder {
 	lf := &LayerForwarder{
+		bytes:       metrics.ForRoom(roomID),
 		remoteTrack: remote,
 		senderPC:    senderPC,
 		remoteSSRC:  uint32(remote.SSRC()),
@@ -296,6 +301,7 @@ func (lf *LayerForwarder) run() {
 		}
 
 		raw := buf[:n]
+		lf.bytes.In.Add(float64(n))
 
 		// Parse the RTP header to extract DD extension.
 		headerLen, unmarshalErr := header.Unmarshal(raw)
@@ -339,6 +345,7 @@ func (lf *LayerForwarder) run() {
 			if _, writeErr := rs.Track.Write(out); writeErr != nil {
 				continue
 			}
+			lf.bytes.Out.Add(float64(len(out)))
 		}
 		lf.mu.RUnlock()
 	}
