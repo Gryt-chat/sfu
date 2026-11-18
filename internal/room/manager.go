@@ -67,6 +67,8 @@ type Manager struct {
 	debug      bool
 	// Refuse the legacy shared-password join path. Guarded by mutex.
 	requireClientToken bool
+	// When set, only the servers listed there may register. Guarded by mutex.
+	allowlistPath string
 }
 
 // NewManager creates a new room manager
@@ -145,6 +147,13 @@ func (m *Manager) RegisterServer(serverID, serverPassword, roomID string) error 
 		if serverPassword == "" {
 			log.Printf("❌ Refusing to register server %s with an empty secret. Upgrade the server; it generates one now (GRYT-786)", serverID)
 			return fmt.Errorf("server %s registered with an empty secret", serverID)
+		}
+
+		if m.allowlistPath != "" {
+			if err := allowed(m.allowlistPath, serverID, serverPassword); err != nil {
+				log.Printf("❌ Refusing to register server %s: %v", serverID, err)
+				return err
+			}
 		}
 
 		// Check if server is already registered

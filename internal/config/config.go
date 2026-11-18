@@ -56,6 +56,8 @@ type Config struct {
 	// RequireClientToken refuses the legacy shared-password join path. See
 	// internal/auth: until this is on, knowing the old password is still enough.
 	RequireClientToken bool
+	// ServersFile, when set, is the only list of server IDs and secrets that may register.
+	ServersFile string
 
 	// Where Prometheus metrics are served. Deliberately not the main port; see
 	// cmd/sfu/main.go. Zero switches serving them off entirely.
@@ -303,6 +305,7 @@ func Load() (*Config, error) {
 		VideoTransport:     videoTransport,
 		DisableSTUN:        disableSTUN,
 		RequireClientToken: requireClientToken,
+		ServersFile:        strings.TrimSpace(os.Getenv("SFU_SERVERS_FILE")),
 		MetricsPort:        metricsPort,
 		MetricsHost:        metricsHost,
 		ControlPort:        controlPort,
