@@ -80,7 +80,7 @@ func (m *Manager) AddTrackToRoom(roomID string, t *webrtc.TrackRemote, senderPC 
 	if m.roomForwarders[roomID] == nil {
 		m.roomForwarders[roomID] = make(map[string]*svc.LayerForwarder)
 	}
-	lf := svc.NewLayerForwarder(t, senderPC, m.debug)
+	lf := svc.NewLayerForwarder(roomID, t, senderPC, m.debug)
 	m.roomForwarders[roomID][t.ID()] = lf
 
 	codec := t.Codec()

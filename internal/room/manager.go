@@ -16,6 +16,16 @@ import (
 	"sfu-v2/pkg/types"
 )
 
+// ServerOfRoom is the server a room belongs to, for counting its media.
+func (m *Manager) ServerOfRoom(roomID string) (string, bool) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	if room, ok := m.rooms[roomID]; ok {
+		return room.ServerID, true
+	}
+	return "", false
+}
+
 // SetRequireClientToken turns off the legacy shared-password join path.
 func (m *Manager) SetRequireClientToken(require bool) {
 	m.mutex.Lock()

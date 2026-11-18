@@ -144,6 +144,7 @@ func main() {
 	err = recovery.SafeExecute("MAIN", "INIT_ROOM_MANAGER", func() error {
 		roomManager = room.NewManager(cfg.Debug)
 		roomManager.SetRequireClientToken(cfg.RequireClientToken)
+		metrics.SetServerResolver(roomManager.ServerOfRoom)
 		if cfg.RequireClientToken {
 			log.Printf("🔒 Client tokens required; the legacy shared-password join path is off")
 		} else {

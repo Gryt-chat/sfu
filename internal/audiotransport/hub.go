@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"sync"
 	"time"
+
+	"sfu-v2/internal/metrics"
 )
 
 // datagramSender is what a member's session can do; a WebTransport session's stream in production,
@@ -161,6 +163,9 @@ func (h *hub) forward(m *member, b []byte, now time.Time) {
 		m.video.keep(pieceOf(b), out)
 	}
 	h.mu.Unlock()
+	bytes := metrics.ForRoom(m.roomID)
+	bytes.In.Add(float64(len(b)))
+	bytes.Out.Add(float64(len(out) * len(others)))
 	for _, o := range others {
 		// A full or closed session loses this packet; neither audio nor video waits.
 		_ = o.out.SendDatagram(out)
