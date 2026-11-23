@@ -518,10 +518,7 @@ func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
 
 	// All ICE traffic flows over one UDP port: far easier through a firewall than a range,
 	// and networks that drop UDP on high ports let a recognised one through.
-	udpMux, muxErr := ice.NewMultiUDPMuxFromPort(
-		cfg.ICEUDPMuxPort,
-		ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress),
-	)
+	udpMux, muxErr := newICEUDPMux(cfg)
 	if muxErr != nil {
 		return se, fmt.Errorf("failed to create ICE UDP mux on port %d: %w", cfg.ICEUDPMuxPort, muxErr)
 	}
@@ -544,6 +541,20 @@ func newSettingEngine(cfg *config.Config) (pion.SettingEngine, error) {
 	}
 
 	return se, nil
+}
+
+// newICEUDPMux binds one socket per address, unless ICE_ADVERTISE_IP is set: behind that NAT a
+// container on several networks would answer from a socket the NAT never saw, so bind one wildcard.
+func newICEUDPMux(cfg *config.Config) (ice.UDPMux, error) {
+	if len(cfg.ICEAdvertiseIPs) == 0 {
+		return ice.NewMultiUDPMuxFromPort(cfg.ICEUDPMuxPort, ice.UDPMuxFromPortWithIPFilter(shouldBindICEUDPAddress))
+	}
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.ICEUDPMuxPort})
+	if err != nil {
+		return nil, err
+	}
+
+	return ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn}), nil
 }
 
 func shouldBindICEUDPAddress(ip net.IP) bool {
