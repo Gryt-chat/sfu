@@ -3,6 +3,7 @@ package signaling
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/pion/rtcp"
@@ -21,7 +22,14 @@ type Coordinator struct {
 	webrtcManager *peerManager.Manager
 	roomManager   *room.Manager
 	debug         bool
+
+	offersMu sync.Mutex
+	// When each peer's last offer went out, so one never answered can be rolled back (GRYT-2244).
+	offerSentAt map[string]time.Time
 }
+
+// staleOfferAfter is how long an offer waits for its answer before it's rolled back and sent again.
+const staleOfferAfter = 5 * time.Second
 
 // NewCoordinator creates a new signaling coordinator
 func NewCoordinator(trackManager *track.Manager, webrtcManager *peerManager.Manager, roomManager *room.Manager, debug bool) *Coordinator {
@@ -30,6 +38,7 @@ func NewCoordinator(trackManager *track.Manager, webrtcManager *peerManager.Mana
 		webrtcManager: webrtcManager,
 		roomManager:   roomManager,
 		debug:         debug,
+		offerSentAt:   make(map[string]time.Time),
 	}
 }
 
@@ -151,6 +160,10 @@ func (c *Coordinator) SignalPeerConnectionsInRoom(roomID string) {
 // It uses LayerForwarder to provide per-receiver tracks with SVC layer filtering.
 func (c *Coordinator) processPeerConnection(clientID string, peerConnection *webrtc.PeerConnection, wsConn interface{}, tracks map[string]*webrtc.TrackLocalStaticRTP, roomID string) error {
 	signalingState := peerConnection.SignalingState()
+	if signalingState == webrtc.SignalingStateHaveLocalOffer && c.offerStale(clientID) {
+		// Pion can't roll back a local offer, so the same one goes again; its answer re-signals the room.
+		return c.resendPendingOffer(clientID, roomID, peerConnection, wsConn)
+	}
 	if signalingState != webrtc.SignalingStateStable {
 		c.debugLog("⏳ Skipping peer %s, signaling state: %v (will retry after backoff)", clientID, signalingState)
 		return fmt.Errorf("peer %s signaling not stable (%v)", clientID, signalingState)
@@ -310,7 +323,12 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 
 	c.debugLog("📤 Sending offer to peer %s (%d bytes)", clientID, len(offerString))
 
-	return recovery.SafeExecuteWithContext("SIGNALING", "SEND_OFFER", clientID, roomID, "Sending WebRTC offer", func() error {
+	return c.sendOffer(clientID, roomID, peerConnection, wsConn, offerString)
+}
+
+// sendOffer writes the offer to the peer's socket and starts watching for its answer.
+func (c *Coordinator) sendOffer(clientID, roomID string, peerConnection *webrtc.PeerConnection, wsConn interface{}, offerString []byte) error {
+	err := recovery.SafeExecuteWithContext("SIGNALING", "SEND_OFFER", clientID, roomID, "Sending WebRTC offer", func() error {
 		if conn, ok := wsConn.(interface{ WriteJSON(interface{}) error }); ok && conn != nil {
 			return conn.WriteJSON(&types.WebSocketMessage{
 				Event: types.EventOffer,
@@ -319,6 +337,52 @@ func (c *Coordinator) processPeerConnection(clientID string, peerConnection *web
 		}
 		return fmt.Errorf("invalid WebSocket connection type for client %s", clientID)
 	})
+	if err == nil {
+		c.watchOffer(clientID, roomID, peerConnection)
+	}
+	return err
+}
+
+// resendPendingOffer sends an unanswered offer again, for a peer that lost or dropped it (GRYT-2244).
+func (c *Coordinator) resendPendingOffer(clientID, roomID string, peerConnection *webrtc.PeerConnection, wsConn interface{}) error {
+	pending := peerConnection.PendingLocalDescription()
+	if pending == nil {
+		return fmt.Errorf("peer %s: unanswered offer has no pending description", clientID)
+	}
+	offerString, err := recovery.SafeJSONMarshal(pending)
+	if err != nil {
+		return err
+	}
+	log.Printf("[SIGNALING] Peer %s never answered an offer in %v; sending it again", clientID, staleOfferAfter)
+	return c.sendOffer(clientID, roomID, peerConnection, wsConn, offerString)
+}
+
+// watchOffer notes the offer's time and, if it's still unanswered once stale, signals the room again.
+func (c *Coordinator) watchOffer(clientID, roomID string, peerConnection *webrtc.PeerConnection) {
+	sentAt := time.Now()
+	c.offersMu.Lock()
+	c.offerSentAt[clientID] = sentAt
+	c.offersMu.Unlock()
+	time.AfterFunc(staleOfferAfter+100*time.Millisecond, func() {
+		stuck := peerConnection.SignalingState() == webrtc.SignalingStateHaveLocalOffer
+		c.offersMu.Lock()
+		same := c.offerSentAt[clientID].Equal(sentAt)
+		if same && !stuck {
+			delete(c.offerSentAt, clientID)
+		}
+		c.offersMu.Unlock()
+		if same && stuck {
+			c.SignalPeerConnectionsInRoom(roomID)
+		}
+	})
+}
+
+// offerStale reports whether the peer's last offer has waited longer than staleOfferAfter.
+func (c *Coordinator) offerStale(clientID string) bool {
+	c.offersMu.Lock()
+	defer c.offersMu.Unlock()
+	sentAt, ok := c.offerSentAt[clientID]
+	return ok && time.Since(sentAt) >= staleOfferAfter
 }
 
 // fedByNoForwarder reports a sender whose track the room's forwarder for that id no longer
